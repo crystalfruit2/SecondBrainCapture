@@ -21,6 +21,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.alp.SecondBrainCapture
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 3KQT8N29A9
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Used to record your voice notes."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Used to transcribe your voice notes into text."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
