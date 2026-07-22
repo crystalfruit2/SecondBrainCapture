@@ -17,15 +17,21 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                editor
-                statusLine
-                HStack(spacing: 12) {
-                    recordButton
-                    captureButton
+            ScrollView {
+                VStack(spacing: 20) {
+                    editor
+                    statusLine
+                    HStack(spacing: 12) {
+                        recordButton
+                        captureButton
+                    }
+                    if !queue.recent.isEmpty {
+                        recentSection
+                    }
                 }
+                .padding()
             }
-            .padding()
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Capture")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -47,18 +53,20 @@ struct ContentView: View {
         TextEditor(text: $draft)
             .focused($editorFocused)
             .scrollContentBackground(.hidden)
-            .padding(10)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
             .overlay(alignment: .topLeading) {
                 if draft.isEmpty {
                     Text("Tap the mic and talk, or just type…")
                         .foregroundStyle(.secondary)
-                        .padding(18)
+                        .padding(22)
                         .allowsHitTesting(false)
                 }
             }
-            .frame(maxHeight: .infinity)
+            .frame(minHeight: 160, maxHeight: 260)
     }
 
     private var statusLine: some View {
@@ -66,31 +74,74 @@ struct ContentView: View {
             switch status {
             case .idle:
                 if speech.isRecording {
-                    Label("Listening…", systemImage: "waveform").foregroundStyle(.red)
+                    statusBadge("Listening…", icon: "waveform", color: .red)
                 } else if !config.hasToken {
-                    Label("No token set — open Settings", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                    statusBadge("No token set — open Settings", icon: "exclamationmark.triangle.fill", color: .orange)
                 } else if queue.count > 0 {
-                    Label("^[\(queue.count) note](inflect: true) waiting to sync…",
-                          systemImage: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(.orange)
+                    statusBadge("^[\(queue.count) note](inflect: true) waiting to sync…",
+                                 icon: "arrow.triangle.2.circlepath", color: .orange)
                 } else {
-                    Text(" ")
+                    EmptyView()
                 }
             case .committing:
-                Label("Saving to Inbox…", systemImage: "arrow.up.circle").foregroundStyle(.secondary)
+                statusBadge("Saving to Inbox…", icon: "arrow.up.circle", color: .secondary)
             case .success:
-                Label("Saved to Inbox ✅", systemImage: "checkmark.circle").foregroundStyle(.green)
+                statusBadge("Saved to Inbox", icon: "checkmark.circle.fill", color: .green)
             case .queued(let n):
-                Label("Saved on device — will sync (^[\(n) note](inflect: true) queued)",
-                      systemImage: "tray.and.arrow.down")
-                    .foregroundStyle(.orange)
+                statusBadge("Saved on device (^[\(n) note](inflect: true) queued)",
+                             icon: "tray.and.arrow.down.fill", color: .orange)
             case .error(let msg):
-                Label(msg, systemImage: "xmark.octagon").foregroundStyle(.red)
+                statusBadge(msg, icon: "xmark.octagon.fill", color: .red)
             }
         }
-        .font(.callout)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func statusBadge(_ text: String, icon: String, color: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.callout.weight(.medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(color.opacity(0.12), in: Capsule())
+    }
+
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recent")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 2)
+            VStack(spacing: 8) {
+                ForEach(queue.recent) { item in
+                    recentRow(item)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func recentRow(_ item: RecentCapture) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.synced ? "checkmark.circle.fill" : "clock.fill")
+                .foregroundStyle(item.synced ? .green : .orange)
+                .imageScale(.small)
+                .padding(.top, 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.preview)
+                    .font(.footnote)
+                    .lineLimit(2)
+                Text(item.createdAt, format: .relative(presentation: .named))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
     }
 
     private var recordButton: some View {
@@ -99,10 +150,13 @@ struct ContentView: View {
         } label: {
             Label(speech.isRecording ? "Stop" : "Record",
                   systemImage: speech.isRecording ? "stop.circle.fill" : "mic.circle.fill")
+                .font(.body.weight(.medium))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .padding(.vertical, 12)
         }
         .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+        .controlSize(.large)
         .tint(speech.isRecording ? .red : .accentColor)
     }
 
@@ -111,10 +165,13 @@ struct ContentView: View {
             Task { await capture() }
         } label: {
             Label("Capture", systemImage: "tray.and.arrow.down.fill")
+                .font(.body.weight(.semibold))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+        .controlSize(.large)
         .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || status == .committing)
     }
 

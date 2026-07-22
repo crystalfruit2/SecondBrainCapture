@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject var config: AppConfig
@@ -54,6 +55,17 @@ struct SettingsView: View {
                     Text("The token needs **Contents: read/write** on this repo. Notes are written to \(config.folder)/ as new timestamped files.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("Back Tap") {
+                    Text("One-time setup — iOS doesn't let apps assign themselves, so this needs a quick manual step: Settings ▸ Accessibility ▸ Touch ▸ Back Tap ▸ Double Tap (or Triple Tap) ▸ **Open Capture**.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("Open Settings app") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
                 }
             }
             .navigationTitle("Settings")

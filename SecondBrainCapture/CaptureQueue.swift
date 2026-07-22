@@ -15,6 +15,16 @@ struct PendingCapture: Codable, Identifiable, Equatable {
     }
 }
 
+/// A lightweight history entry for the "Recent" list — separate from
+/// `PendingCapture` because it survives after a capture has synced, purely
+/// for at-a-glance confirmation of what was captured recently.
+struct RecentCapture: Codable, Identifiable, Equatable {
+    let id: UUID
+    let preview: String
+    let createdAt: Date
+    var synced: Bool
+}
+
 /// Durable, offline-first queue for captures.
 ///
 /// Every capture is appended here and persisted to disk *before* any network
@@ -25,6 +35,8 @@ struct PendingCapture: Codable, Identifiable, Equatable {
 final class CaptureQueue: ObservableObject {
     @Published private(set) var pending: [PendingCapture] = []
     @Published private(set) var isFlushing = false
+    /// Last few captures (queued or synced), newest first — for the "Recent" list.
+    @Published private(set) var recent: [RecentCapture] = []
 
     /// Supplies a configured service, or nil if the app isn't set up yet
     /// (no token). Wired up by the app once AppConfig exists.
@@ -32,6 +44,8 @@ final class CaptureQueue: ObservableObject {
 
     private let monitor = NWPathMonitor()
     private let fileURL: URL
+    private let recentURL: URL
+    private let recentLimit = 15
 
     var count: Int { pending.count }
 
@@ -40,7 +54,9 @@ final class CaptureQueue: ObservableObject {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("capture-queue.json")
+        recentURL = dir.appendingPathComponent("recent-captures.json")
         load()
+        loadRecent()
 
         // Retry automatically the moment connectivity comes back.
         monitor.pathUpdateHandler = { [weak self] path in
@@ -52,8 +68,13 @@ final class CaptureQueue: ObservableObject {
 
     /// Add a capture to the queue and persist it immediately.
     func enqueue(_ text: String, createdAt: Date = Date()) {
-        pending.append(PendingCapture(text: text, createdAt: createdAt))
+        let item = PendingCapture(text: text, createdAt: createdAt)
+        pending.append(item)
         save()
+
+        recent.insert(RecentCapture(id: item.id, preview: String(text.prefix(80)), createdAt: createdAt, synced: false), at: 0)
+        if recent.count > recentLimit { recent.removeLast(recent.count - recentLimit) }
+        saveRecent()
     }
 
     /// Commit queued captures in order. Stops at the first failure so order is
@@ -72,11 +93,18 @@ final class CaptureQueue: ObservableObject {
                 _ = try await service.commitNote(text: item.text, date: item.createdAt)
                 pending.removeFirst()
                 save()
+                markSynced(item.id)
             } catch {
                 return false   // still offline / bad token — keep the rest queued
             }
         }
         return true
+    }
+
+    private func markSynced(_ id: UUID) {
+        guard let index = recent.firstIndex(where: { $0.id == id }) else { return }
+        recent[index].synced = true
+        saveRecent()
     }
 
     // MARK: - Persistence
@@ -90,5 +118,16 @@ final class CaptureQueue: ObservableObject {
     private func save() {
         guard let data = try? JSONEncoder().encode(pending) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    private func loadRecent() {
+        guard let data = try? Data(contentsOf: recentURL),
+              let items = try? JSONDecoder().decode([RecentCapture].self, from: data) else { return }
+        recent = items
+    }
+
+    private func saveRecent() {
+        guard let data = try? JSONEncoder().encode(recent) else { return }
+        try? data.write(to: recentURL, options: .atomic)
     }
 }
