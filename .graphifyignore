@@ -1,0 +1,8 @@
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+SecondBrainCapture.xcodeproj/
+graphify-out/
+.git/
