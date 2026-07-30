@@ -9,6 +9,8 @@ final class AppConfig: ObservableObject {
     @Published var repo: String { didSet { UserDefaults.standard.set(repo, forKey: "repo") } }
     @Published var branch: String { didSet { UserDefaults.standard.set(branch, forKey: "branch") } }
     @Published var folder: String { didSet { UserDefaults.standard.set(folder, forKey: "folder") } }
+    /// Repo-relative path of the prebuilt dashboard the vault's GitHub Action writes.
+    @Published var dashboardPath: String { didSet { UserDefaults.standard.set(dashboardPath, forKey: "dashboardPath") } }
     @Published private(set) var hasToken: Bool
 
     init() {
@@ -17,6 +19,7 @@ final class AppConfig: ObservableObject {
         repo = d.string(forKey: "repo") ?? "second_brain"
         branch = d.string(forKey: "branch") ?? "main"
         folder = d.string(forKey: "folder") ?? "Inbox"
+        dashboardPath = d.string(forKey: "dashboardPath") ?? "dashboard.json"
         hasToken = KeychainStore.loadToken() != nil
     }
 

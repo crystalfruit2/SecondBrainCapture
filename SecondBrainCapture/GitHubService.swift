@@ -28,7 +28,9 @@ struct GitHubService {
     let config: GitHubConfig
     let token: String
 
-    private func authedRequest(url: URL, method: String) -> URLRequest {
+    // Not private: the dashboard read/write paths in GitHubService+Dashboard.swift
+    // build on the same auth headers and error handling.
+    func authedRequest(url: URL, method: String) -> URLRequest {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -80,7 +82,7 @@ struct GitHubService {
 
     // MARK: - Helpers
 
-    private static func check(_ resp: URLResponse, _ data: Data) throws {
+    static func check(_ resp: URLResponse, _ data: Data) throws {
         guard let http = resp as? HTTPURLResponse else { return }
         guard (200...299).contains(http.statusCode) else {
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]

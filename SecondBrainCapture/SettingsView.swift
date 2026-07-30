@@ -34,6 +34,14 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    LabeledField("Dashboard", text: $config.dashboardPath)
+                } header: {
+                    Text("Dashboard")
+                } footer: {
+                    Text("Repo-relative path of the file the vault's GitHub Action generates. The Today, Tasks and Projects tabs read only this file.")
+                }
+
+                Section {
                     Button {
                         Task { await test() }
                     } label: {
