@@ -50,24 +50,56 @@ struct GitHubService {
         try Self.check(resp, data)
     }
 
+    /// Subfolder of `<folder>/` that captured photos land in. `process-inbox`
+    /// moves each image next to its note once it has routed it, so this is a
+    /// staging area, not the image's final home.
+    static let attachmentsSubfolder = "attachments"
+
     /// Create a new markdown note in `<folder>/`. Returns the filename written.
     /// `date` is the moment the note was captured — passing it explicitly keeps
     /// queued offline notes stamped with their original time, not their sync time.
+    /// `imageName` embeds a photo committed by `commitImage`.
     @discardableResult
-    func commitNote(text: String, date: Date = Date()) async throws -> String {
+    func commitNote(text: String, date: Date = Date(), imageName: String? = nil) async throws -> String {
         guard !token.isEmpty else { throw GitHubError.missingToken }
 
         let filename = Self.makeFilename(from: text, date: date)
-        let path = "\(config.folder)/\(filename)"
+        let markdown = Self.makeMarkdown(from: text, date: date, imageName: imageName)
+        try await putNewFile(path: "\(config.folder)/\(filename)",
+                             content: Data(markdown.utf8),
+                             message: "mobile capture: \(filename)")
+        return filename
+    }
+
+    /// Upload a captured photo to `<folder>/attachments/`. Returns its filename.
+    ///
+    /// Committed *before* the note that embeds it: if the note's commit then
+    /// fails, an orphan image is harmless, whereas a note pointing at a missing
+    /// image is a broken link in the vault.
+    @discardableResult
+    func commitImage(data: Data, filename: String) async throws -> String {
+        guard !token.isEmpty else { throw GitHubError.missingToken }
+        try await putNewFile(path: "\(config.folder)/\(Self.attachmentsSubfolder)/\(filename)",
+                             content: data,
+                             message: "mobile capture: \(filename)")
+        return filename
+    }
+
+    /// PUT a file that is expected not to exist yet.
+    ///
+    /// Treats "already exists" as success. The queue retries a failed capture
+    /// from the top, so a photo whose image commit succeeded but whose note
+    /// commit failed will re-upload the same image on the next flush — that
+    /// retry must not deadlock the queue on a file we ourselves just wrote.
+    private func putNewFile(path: String, content: Data, message: String) async throws {
         guard let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://api.github.com/repos/\(config.owner)/\(config.repo)/contents/\(encodedPath)") else {
             throw GitHubError.badURL
         }
 
-        let markdown = Self.makeMarkdown(from: text, date: date)
         let body: [String: Any] = [
-            "message": "mobile capture: \(filename)",
-            "content": Data(markdown.utf8).base64EncodedString(),
+            "message": message,
+            "content": content.base64EncodedString(),
             "branch": config.branch
         ]
 
@@ -76,8 +108,12 @@ struct GitHubService {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, resp) = try await URLSession.shared.data(for: req)
-        try Self.check(resp, data)
-        return filename
+        do {
+            try Self.check(resp, data)
+        } catch GitHubError.badResponse(let code, let msg)
+                    where code == 422 && msg.lowercased().contains("already exists") {
+            return
+        }
     }
 
     // MARK: - Helpers
@@ -100,18 +136,24 @@ struct GitHubService {
         return slug.isEmpty ? "\(stamp).md" : "\(stamp) - \(slug).md"
     }
 
-    static func makeMarkdown(from text: String, date: Date = Date()) -> String {
+    static func makeMarkdown(from text: String, date: Date = Date(), imageName: String? = nil) -> String {
         let iso = ISO8601DateFormatter().string(from: date)
+        // `capture-type: photo` is the flag process-inbox keys off to know it
+        // must carry the image along when it routes the note.
+        let kind = imageName == nil ? "" : "\ncapture-type: photo"
+        // Path-qualified so the embed still resolves while the note sits in
+        // Inbox/ next to attachments/; process-inbox rewrites it on the move.
+        let embed = imageName.map { "![[\(attachmentsSubfolder)/\($0)]]\n\n" } ?? ""
         return """
         ---
         date: \(iso)
         tags:
           - inbox
           - mobile-capture
-        source: mobile
+        source: mobile\(kind)
         ---
 
-        \(text)
+        \(embed)\(text)
         """
     }
 

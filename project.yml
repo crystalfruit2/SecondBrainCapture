@@ -25,6 +25,8 @@ targets:
         DEVELOPMENT_TEAM: 3KQT8N29A9
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Used to record your voice notes."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Used to transcribe your voice notes into text."
+        INFOPLIST_KEY_NSCameraUsageDescription: "Used to photograph whiteboards, book pages and handwritten notes."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Used to pick an existing photo to capture as a note."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"

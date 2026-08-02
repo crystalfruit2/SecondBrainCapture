@@ -7,11 +7,15 @@ struct PendingCapture: Codable, Identifiable, Equatable {
     let id: UUID
     let text: String
     let createdAt: Date
+    /// Local filename of a photo staged in `ImageStore`, for photo captures.
+    /// Optional so queues written by older builds still decode.
+    let imageFilename: String?
 
-    init(text: String, createdAt: Date = Date()) {
+    init(text: String, createdAt: Date = Date(), imageFilename: String? = nil) {
         self.id = UUID()
         self.text = text
         self.createdAt = createdAt
+        self.imageFilename = imageFilename
     }
 }
 
@@ -23,6 +27,10 @@ struct RecentCapture: Codable, Identifiable, Equatable {
     let preview: String
     let createdAt: Date
     var synced: Bool
+    /// Optional so history written by older builds still decodes.
+    var hasImage: Bool?
+
+    var isPhoto: Bool { hasImage == true }
 }
 
 /// Durable, offline-first queue for captures.
@@ -67,12 +75,16 @@ final class CaptureQueue: ObservableObject {
     }
 
     /// Add a capture to the queue and persist it immediately.
-    func enqueue(_ text: String, createdAt: Date = Date()) {
-        let item = PendingCapture(text: text, createdAt: createdAt)
+    /// `imageFilename` refers to a photo already staged by `ImageStore`.
+    func enqueue(_ text: String, createdAt: Date = Date(), imageFilename: String? = nil) {
+        let item = PendingCapture(text: text, createdAt: createdAt, imageFilename: imageFilename)
         pending.append(item)
         save()
 
-        recent.insert(RecentCapture(id: item.id, preview: String(text.prefix(80)), createdAt: createdAt, synced: false), at: 0)
+        // A photo with no legible text still needs something to show in Recent.
+        let preview = text.isEmpty && imageFilename != nil ? "Photo" : String(text.prefix(80))
+        recent.insert(RecentCapture(id: item.id, preview: preview, createdAt: createdAt,
+                                    synced: false, hasImage: imageFilename != nil), at: 0)
         if recent.count > recentLimit { recent.removeLast(recent.count - recentLimit) }
         saveRecent()
     }
@@ -90,7 +102,18 @@ final class CaptureQueue: ObservableObject {
 
         while let item = pending.first {
             do {
-                _ = try await service.commitNote(text: item.text, date: item.createdAt)
+                // Image first, so the note is never committed pointing at an
+                // attachment that isn't in the repo yet.
+                if let filename = item.imageFilename, let data = ImageStore.load(filename) {
+                    try await service.commitImage(data: data, filename: filename)
+                    try await service.commitNote(text: item.text, date: item.createdAt,
+                                                 imageName: filename)
+                    ImageStore.delete(filename)
+                } else {
+                    // A missing staged file means the note text is all we have
+                    // left; committing it plain beats blocking the queue forever.
+                    try await service.commitNote(text: item.text, date: item.createdAt)
+                }
                 pending.removeFirst()
                 save()
                 markSynced(item.id)

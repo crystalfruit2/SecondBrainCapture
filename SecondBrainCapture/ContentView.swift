@@ -4,11 +4,14 @@ struct ContentView: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var queue: CaptureQueue
     @StateObject private var speech = SpeechRecognizer()
+    @StateObject private var ocr = TextRecognizer()
 
     @State private var draft = ""
     @State private var baseText = ""          // editor text captured when recording starts
     @State private var status: Status = .idle
     @State private var showSettings = false
+    @State private var showCamera = false
+    @State private var photo: UIImage?        // prepared (downscaled) attachment
     @FocusState private var editorFocused: Bool
 
     enum Status: Equatable {
@@ -20,9 +23,18 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     editor
+                    if let photo {
+                        photoPreview(photo)
+                    }
                     statusLine
-                    HStack(spacing: 12) {
-                        recordButton
+                    // Record and Photo are the two ways text gets *into* the
+                    // draft; Capture is what sends it. Keeping that split across
+                    // two rows leaves Capture full-width and unmissable.
+                    VStack(spacing: 12) {
+                        HStack(spacing: 12) {
+                            recordButton
+                            photoButton
+                        }
                         captureButton
                     }
                     if !queue.recent.isEmpty {
@@ -42,6 +54,12 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView().environmentObject(config)
+            }
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraPicker { picked in
+                    Task { await attach(picked) }
+                }
+                .ignoresSafeArea()
             }
             .onChange(of: speech.transcript) { _, newValue in
                 draft = baseText.isEmpty ? newValue : baseText + " " + newValue
@@ -73,7 +91,9 @@ struct ContentView: View {
         Group {
             switch status {
             case .idle:
-                if speech.isRecording {
+                if ocr.isRecognizing {
+                    statusBadge("Reading text…", icon: "text.viewfinder", color: .secondary)
+                } else if speech.isRecording {
                     statusBadge("Listening…", icon: "waveform", color: .red)
                 } else if !config.hasToken {
                     statusBadge("No token set — open Settings", icon: "exclamationmark.triangle.fill", color: .orange)
@@ -128,9 +148,16 @@ struct ContentView: View {
                 .imageScale(.small)
                 .padding(.top, 3)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.preview)
-                    .font(.footnote)
-                    .lineLimit(2)
+                HStack(spacing: 5) {
+                    if item.isPhoto {
+                        Image(systemName: "photo")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(item.preview)
+                        .font(.footnote)
+                        .lineLimit(2)
+                }
                 Text(item.createdAt, format: .relative(presentation: .named))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -160,6 +187,45 @@ struct ContentView: View {
         .tint(speech.isRecording ? .red : .accentColor)
     }
 
+    private var photoButton: some View {
+        Button {
+            showCamera = true
+        } label: {
+            Label(photo == nil ? "Photo" : "Retake", systemImage: "camera.fill")
+                .font(.body.weight(.medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+        .controlSize(.large)
+        .disabled(ocr.isRecognizing)
+    }
+
+    /// The attached photo, with a way to drop it. Shown at a readable size so a
+    /// blurry shot is caught here rather than in the vault a week later.
+    private func photoPreview(_ image: UIImage) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Button {
+                photo = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, .black.opacity(0.5))
+            }
+            .padding(8)
+            .accessibilityLabel("Remove photo")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var captureButton: some View {
         Button {
             Task { await capture() }
@@ -172,7 +238,13 @@ struct ContentView: View {
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.roundedRectangle(radius: 14))
         .controlSize(.large)
-        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || status == .committing)
+        .disabled(!hasSomethingToCapture || status == .committing || ocr.isRecognizing)
+    }
+
+    /// A photo is a note in its own right — a whiteboard shot with no legible
+    /// text is still worth keeping, so an empty draft doesn't block Capture.
+    private var hasSomethingToCapture: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || photo != nil
     }
 
     private func toggleRecording() async {
@@ -193,10 +265,25 @@ struct ContentView: View {
         }
     }
 
+    /// Downscale the shot, read its text, and drop that text into the draft so
+    /// it can be corrected before it's committed. Appended rather than
+    /// substituted — a photo may be adding to something already dictated.
+    private func attach(_ image: UIImage) async {
+        let prepared = ImageStore.prepared(image)
+        photo = prepared
+        status = .idle
+
+        let text = await ocr.recognize(prepared)
+        guard !text.isEmpty else { return }   // no legible text; the photo is the note
+        let existing = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = existing.isEmpty ? text : existing + "\n\n" + text
+        baseText = draft   // keep dictation appending after the OCR text, not over it
+    }
+
     private func capture() async {
         if speech.isRecording { speech.stop() }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard hasSomethingToCapture else { return }
         guard config.hasToken else {
             status = .error("No token. Open Settings and add a GitHub token.")
             return
@@ -204,9 +291,14 @@ struct ContentView: View {
         // Persist first, then try to sync. The note is safe on disk the instant
         // the user taps Capture, even with no signal.
         status = .committing
-        queue.enqueue(text)
+        let now = Date()
+        // Staging the image before enqueuing keeps the queue's promise: nothing
+        // is queued that isn't already durable on disk.
+        let imageFilename = photo.flatMap { ImageStore.save($0, date: now) }
+        queue.enqueue(text, createdAt: now, imageFilename: imageFilename)
         draft = ""
         baseText = ""
+        photo = nil
 
         let drained = await queue.flush()
         status = drained ? .success : .queued(queue.count)
