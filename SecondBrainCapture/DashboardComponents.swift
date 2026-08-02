@@ -115,6 +115,53 @@ struct TaskRow: View {
     }
 }
 
+// MARK: - Market row
+
+/// A market item's checkbox has no bucket/pill logic to carry — it's the
+/// plainest row in the app on purpose.
+struct MarketRow: View {
+    let item: MarketItem
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onToggle) {
+                checkbox
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+
+            Text(item.text)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(item.done ? Color.secondary : Color.primary)
+                .strikethrough(item.done, color: .secondary)
+                .lineLimit(3)
+
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .animation(.snappy(duration: 0.2), value: item.done)
+    }
+
+    private var checkbox: some View {
+        ZStack {
+            if item.done {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.green)
+                    .transition(.scale.combined(with: .opacity))
+            } else {
+                Circle()
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .frame(width: 22, height: 22)
+            }
+        }
+        .frame(width: 22, height: 22)
+    }
+}
+
 // MARK: - Rocky card
 
 /// The Companion showing up when Alp is *not* in a Claude session — one card,

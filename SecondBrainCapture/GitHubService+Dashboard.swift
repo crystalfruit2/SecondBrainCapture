@@ -112,6 +112,27 @@ extension GitHubService {
                           message: message)
     }
 
+    /// Append one new line to a note — the market list's "add item", the one
+    /// write in this file that doesn't transform an existing line. Same
+    /// SHA-race handling as `editLine`: a concurrent commit (Obsidian Git, a
+    /// task toggle) can make our read stale, so one retry against fresh
+    /// content follows a 409.
+    func appendLine(path: String, line: String, message: String) async throws {
+        do {
+            try await performAppend(path: path, line: line, message: message)
+        } catch GitHubError.badResponse(let code, _) where code == 409 {
+            try await performAppend(path: path, line: line, message: message)
+        }
+    }
+
+    private func performAppend(path: String, line: String, message: String) async throws {
+        let file = try await fetchFile(path: path)
+        var content = file.content
+        if !content.isEmpty && !content.hasSuffix("\n") { content += "\n" }
+        content += line + "\n"
+        try await putFile(path: path, content: content, sha: file.sha, message: message)
+    }
+
     private func putFile(path: String, content: String, sha: String, message: String) async throws {
         guard let url = contentsURL(for: path, ref: nil) else { throw GitHubError.badURL }
         let body: [String: Any] = [

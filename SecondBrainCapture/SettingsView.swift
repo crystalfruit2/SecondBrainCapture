@@ -42,6 +42,14 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    LabeledField("Market list", text: $config.marketListPath)
+                } header: {
+                    Text("Market list")
+                } footer: {
+                    Text("Repo-relative path of the shopping list note. Read via the dashboard like everything else, but written to directly — checking off or adding an item edits this file.")
+                }
+
+                Section {
                     Button {
                         Task { await test() }
                     } label: {

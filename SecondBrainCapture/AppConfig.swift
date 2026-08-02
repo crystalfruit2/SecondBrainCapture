@@ -11,6 +11,9 @@ final class AppConfig: ObservableObject {
     @Published var folder: String { didSet { UserDefaults.standard.set(folder, forKey: "folder") } }
     /// Repo-relative path of the prebuilt dashboard the vault's GitHub Action writes.
     @Published var dashboardPath: String { didSet { UserDefaults.standard.set(dashboardPath, forKey: "dashboardPath") } }
+    /// Repo-relative path of the market list note — a plain checklist, read via
+    /// `dashboard.json` but written to directly (append/toggle).
+    @Published var marketListPath: String { didSet { UserDefaults.standard.set(marketListPath, forKey: "marketListPath") } }
     @Published private(set) var hasToken: Bool
 
     init() {
@@ -20,6 +23,7 @@ final class AppConfig: ObservableObject {
         branch = d.string(forKey: "branch") ?? "main"
         folder = d.string(forKey: "folder") ?? "Inbox"
         dashboardPath = d.string(forKey: "dashboardPath") ?? "dashboard.json"
+        marketListPath = d.string(forKey: "marketListPath") ?? "Areas/Market-List.md"
         hasToken = KeychainStore.loadToken() != nil
     }
 

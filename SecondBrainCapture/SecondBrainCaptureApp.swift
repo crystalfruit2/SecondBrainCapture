@@ -21,6 +21,7 @@ struct SecondBrainCaptureApp: App {
                     }
                     dashboard.serviceProvider = queue.serviceProvider
                     dashboard.dashboardPath = { config.dashboardPath }
+                    dashboard.marketListPath = { config.marketListPath }
                     // Drain anything left over from a previous session.
                     await queue.flush()
                     await dashboard.refreshIfStale()

@@ -95,6 +95,32 @@ struct DashboardTask: Codable, Identifiable, Equatable, Hashable {
 
 enum PillStyle { case overdue, project, date }
 
+/// One line of `Areas/Market-List.md` — flat, no buckets or due dates, just a
+/// checkbox that syncs the same way a task's does.
+struct MarketItem: Codable, Identifiable, Equatable, Hashable {
+    let id: String
+    let text: String
+    var done: Bool
+    let file: String
+    let line: Int
+    let raw: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        done = try c.decodeIfPresent(Bool.self, forKey: .done) ?? false
+        file = try c.decode(String.self, forKey: .file)
+        line = try c.decodeIfPresent(Int.self, forKey: .line) ?? 0
+        raw = try c.decodeIfPresent(String.self, forKey: .raw) ?? ""
+    }
+
+    init(id: String, text: String, done: Bool, file: String, line: Int, raw: String) {
+        self.id = id; self.text = text; self.done = done
+        self.file = file; self.line = line; self.raw = raw
+    }
+}
+
 /// A single nudge from the Companion — the one thing Alp would otherwise miss.
 /// Computed vault-side, where the review cadence and project staleness are known.
 struct RockyNudge: Codable, Equatable, Hashable {
@@ -152,6 +178,7 @@ struct Dashboard: Codable, Equatable {
     var tasks: [DashboardTask]
     let agenda: [AgendaItem]
     let projects: [ProjectSummary]
+    var market: [MarketItem]
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -161,12 +188,16 @@ struct Dashboard: Codable, Equatable {
         tasks = try c.decodeIfPresent([DashboardTask].self, forKey: .tasks) ?? []
         agenda = try c.decodeIfPresent([AgendaItem].self, forKey: .agenda) ?? []
         projects = try c.decodeIfPresent([ProjectSummary].self, forKey: .projects) ?? []
+        // Older dashboards (schema v1, pre-market-list) simply lack this key.
+        market = try c.decodeIfPresent([MarketItem].self, forKey: .market) ?? []
     }
 
     init(version: Int = 1, generated: String? = nil, rocky: RockyNudge? = nil,
-         tasks: [DashboardTask] = [], agenda: [AgendaItem] = [], projects: [ProjectSummary] = []) {
+         tasks: [DashboardTask] = [], agenda: [AgendaItem] = [], projects: [ProjectSummary] = [],
+         market: [MarketItem] = []) {
         self.version = version; self.generated = generated; self.rocky = rocky
         self.tasks = tasks; self.agenda = agenda; self.projects = projects
+        self.market = market
     }
 
     var generatedAt: Date? {

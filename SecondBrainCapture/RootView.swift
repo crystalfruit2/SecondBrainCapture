@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Four tabs, and Capture is deliberately the first one.
+/// Five tabs, and Capture is deliberately the first one.
 ///
 /// The dashboard is additive: the screen Alp already uses doesn't change, it
 /// just becomes one tab of four, and it's still where the app opens. Zero-
@@ -22,6 +22,9 @@ struct RootView: View {
 
             TasksView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
+
+            MarketListView()
+                .tabItem { Label("Market", systemImage: "cart") }
 
             ProjectsView()
                 .tabItem { Label("Projects", systemImage: "square.stack.3d.up") }
