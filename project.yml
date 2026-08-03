@@ -21,6 +21,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.alp.SecondBrainCapture
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: "Rocky's Vault"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 3KQT8N29A9
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Used to record your voice notes."

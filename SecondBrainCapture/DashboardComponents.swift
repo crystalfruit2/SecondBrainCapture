@@ -171,9 +171,10 @@ struct RockyCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 19))
-                .foregroundStyle(Color.accentColor)
+            Image("RockyMascot")
+                .resizable()
+                .scaledToFit()
+                .padding(3)
                 .frame(width: 34, height: 34)
                 .background(Color.accentColor.opacity(0.16),
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
