@@ -83,6 +83,26 @@ struct PendingMarketAction: Codable, Identifiable, Equatable {
     }
 }
 
+/// A Health quick-log entry that hasn't reached GitHub yet. Simpler still than
+/// market's — always an append, never a toggle, and never collapsed with a
+/// sibling, since each tap is its own plain-text moment ("logged plainly, no
+/// lecturing" — every tap is a distinct fact, not a value to overwrite).
+struct PendingHealthAction: Codable, Identifiable, Equatable {
+    let id: UUID
+    let file: String
+    let text: String
+    let createdAt: Date
+
+    init(file: String, text: String) {
+        self.id = UUID()
+        self.file = file
+        self.text = text
+        self.createdAt = Date()
+    }
+
+    var commitMessage: String { "mobile: health log — \(text.prefix(60))" }
+}
+
 /// Owns the read side of the vault: fetches the prebuilt `dashboard.json`,
 /// caches it so the app opens instantly (and works on the underground), and
 /// queues task edits back to GitHub.
@@ -94,6 +114,7 @@ final class DashboardStore: ObservableObject {
     @Published private(set) var lastLoaded: Date?
     @Published private(set) var pending: [PendingTaskAction] = []
     @Published private(set) var marketPending: [PendingMarketAction] = []
+    @Published private(set) var healthPending: [PendingHealthAction] = []
 
     /// Supplies a configured service, or nil when there's no token yet.
     var serviceProvider: () -> GitHubService? = { nil }
@@ -101,18 +122,23 @@ final class DashboardStore: ObservableObject {
     var dashboardPath: () -> String = { "dashboard.json" }
     /// Repo-relative path of the market list note.
     var marketListPath: () -> String = { "Areas/Market-List.md" }
+    /// Repo-relative path of *today's* daily note — the Health log's home.
+    var todayNotePath: () -> String = { "Daily/\(DateFormatter.vaultDay.string(from: Date())).md" }
 
     private let monitor = NWPathMonitor()
     private let cacheURL: URL
     private let queueURL: URL
     private let marketQueueURL: URL
+    private let healthQueueURL: URL
     private var isFlushing = false
     private var isFlushingMarket = false
+    private var isFlushingHealth = false
     /// How long a cached dashboard stays good enough to skip a network round-trip.
     private let staleAfter: TimeInterval = 5 * 60
 
     var pendingCount: Int { pending.count }
     var marketPendingCount: Int { marketPending.count }
+    var healthPendingCount: Int { healthPending.count }
     var hasLoaded: Bool { dashboard != nil }
 
     init() {
@@ -122,15 +148,18 @@ final class DashboardStore: ObservableObject {
         cacheURL = dir.appendingPathComponent("dashboard-cache.json")
         queueURL = dir.appendingPathComponent("task-actions.json")
         marketQueueURL = dir.appendingPathComponent("market-actions.json")
+        healthQueueURL = dir.appendingPathComponent("health-actions.json")
         loadCache()
         loadQueue()
         loadMarketQueue()
+        loadHealthQueue()
 
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
             Task { @MainActor in
                 await self?.flush()
                 await self?.flushMarket()
+                await self?.flushHealth()
             }
         }
         monitor.start(queue: DispatchQueue(label: "com.alp.SecondBrainCapture.dashboard"))
@@ -150,6 +179,7 @@ final class DashboardStore: ObservableObject {
             // A refresh must not visually undo an edit that hasn't synced yet.
             fresh.tasks = applyPending(to: fresh.tasks)
             fresh.market = applyPendingMarket(to: fresh.market)
+            fresh.health = applyPendingHealth(to: fresh.health)
             dashboard = fresh
             lastLoaded = Date()
             lastError = nil
@@ -165,11 +195,13 @@ final class DashboardStore: ObservableObject {
         if let lastLoaded, Date().timeIntervalSince(lastLoaded) < staleAfter, dashboard != nil {
             await flush()
             await flushMarket()
+            await flushHealth()
             return
         }
         await refresh()
         await flush()
         await flushMarket()
+        await flushHealth()
     }
 
     // MARK: - Writing
@@ -309,6 +341,52 @@ final class DashboardStore: ObservableObject {
         return true
     }
 
+    // MARK: - Writing (health log)
+
+    /// Log one plain fact ("🚬", "⚡ energy drink", or a free-text note) to
+    /// today's daily note. Optimistic and offline-first like every other write
+    /// here, but there's nothing to toggle or undo — logging is append-only.
+    func logHealth(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let path = todayNotePath()
+
+        if var board = dashboard {
+            board.health = HealthToday(loggedToday: board.health.loggedToday + [trimmed])
+            dashboard = board
+            saveCache(board)
+        }
+        healthPending.append(PendingHealthAction(file: path, text: trimmed))
+        saveHealthQueue()
+        Task { await flushHealth() }
+    }
+
+    /// Drained in order like the other queues, but never blocked on a specific
+    /// line — each entry is an independent append, so a stale line number can
+    /// never apply.
+    @discardableResult
+    func flushHealth() async -> Bool {
+        guard !isFlushingHealth, !healthPending.isEmpty, let service = serviceProvider() else {
+            return healthPending.isEmpty
+        }
+        isFlushingHealth = true
+        defer { isFlushingHealth = false }
+
+        while let action = healthPending.first {
+            do {
+                try await service.appendHealthBullet(path: action.file, text: action.text,
+                                                     message: action.commitMessage)
+                healthPending.removeFirst()
+                saveHealthQueue()
+                lastError = nil
+            } catch {
+                lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                return false
+            }
+        }
+        return true
+    }
+
     // MARK: - Internals
 
     private func enqueue(_ action: PendingTaskAction) {
@@ -406,6 +484,18 @@ final class DashboardStore: ObservableObject {
         return result
     }
 
+    /// Replay unsynced logs over a freshly fetched "today" list — a still-
+    /// pending entry has no counterpart there yet (CI hasn't reindexed), so
+    /// it's added rather than skipped, same reasoning as market's `.add`.
+    private func applyPendingHealth(to health: HealthToday) -> HealthToday {
+        guard !healthPending.isEmpty else { return health }
+        var items = health.loggedToday
+        for action in healthPending where !items.contains(action.text) {
+            items.append(action.text)
+        }
+        return HealthToday(loggedToday: items)
+    }
+
     // MARK: - Persistence
 
     private func loadCache() {
@@ -441,5 +531,16 @@ final class DashboardStore: ObservableObject {
     private func saveMarketQueue() {
         guard let data = try? JSONEncoder().encode(marketPending) else { return }
         try? data.write(to: marketQueueURL, options: .atomic)
+    }
+
+    private func loadHealthQueue() {
+        guard let data = try? Data(contentsOf: healthQueueURL),
+              let items = try? JSONDecoder().decode([PendingHealthAction].self, from: data) else { return }
+        healthPending = items
+    }
+
+    private func saveHealthQueue() {
+        guard let data = try? JSONEncoder().encode(healthPending) else { return }
+        try? data.write(to: healthQueueURL, options: .atomic)
     }
 }

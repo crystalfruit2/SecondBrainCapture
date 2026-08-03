@@ -155,6 +155,63 @@ extension GitHubService {
         if let ref { comps?.queryItems = [URLQueryItem(name: "ref", value: ref)] }
         return comps?.url
     }
+
+    // MARK: - Health quick-log
+
+    /// Append one bullet under today's daily note's `### Health log` section,
+    /// creating both the section and (if `/start-day` hasn't run yet today)
+    /// the note itself. Same 409-retry contract as `appendLine`.
+    func appendHealthBullet(path: String, text: String, message: String) async throws {
+        do {
+            try await performHealthAppend(path: path, text: text, message: message)
+        } catch GitHubError.badResponse(let code, _) where code == 409 {
+            try await performHealthAppend(path: path, text: text, message: message)
+        } catch GitHubError.badResponse(let code, _) where code == 404 {
+            let fresh = HealthLogEditor.appendBullet(text, to: "")
+            try await putNewFile(path: path, content: Data(fresh.utf8), message: message)
+        }
+    }
+
+    private func performHealthAppend(path: String, text: String, message: String) async throws {
+        let file = try await fetchFile(path: path)
+        let updated = HealthLogEditor.appendBullet(text, to: file.content)
+        guard updated != file.content else { return }
+        try await putFile(path: path, content: updated, sha: file.sha, message: message)
+    }
+}
+
+/// Pure string surgery for the Health quick-log — same "reason about it
+/// without a token" contract as `TaskLineEditor`. Inserts under the note's
+/// `### Health log` heading (creating it, placed before `## Notes & Links`
+/// when that anchor exists, mirroring how Alp adds it by hand) rather than
+/// blindly appending to end-of-file, since a daily note keeps writing after
+/// the log (Notes & Links, Pomodoro Log, End of Day).
+enum HealthLogEditor {
+    static let heading = "### Health log"
+    static let fallbackAnchor = "## Notes & Links"
+
+    static func appendBullet(_ text: String, to content: String) -> String {
+        var lines = content.isEmpty ? [] : content.components(separatedBy: "\n")
+        let bullet = "- \(text)"
+
+        if let headingIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == heading }) {
+            var insertAt = headingIndex + 1
+            while insertAt < lines.count, !lines[insertAt].trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+                insertAt += 1
+            }
+            lines.insert(bullet, at: insertAt)
+            return lines.joined(separator: "\n")
+        }
+
+        if let anchorIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == fallbackAnchor }) {
+            lines.insert(contentsOf: ["", heading, bullet, ""], at: anchorIndex)
+            return lines.joined(separator: "\n")
+        }
+
+        if let last = lines.last, !last.isEmpty { lines.append("") }
+        lines.append(contentsOf: [heading, bullet])
+        return lines.joined(separator: "\n")
+    }
 }
 
 /// Pure string surgery on a markdown task line. Kept separate from the network

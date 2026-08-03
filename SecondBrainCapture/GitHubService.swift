@@ -91,7 +91,9 @@ struct GitHubService {
     /// from the top, so a photo whose image commit succeeded but whose note
     /// commit failed will re-upload the same image on the next flush — that
     /// retry must not deadlock the queue on a file we ourselves just wrote.
-    private func putNewFile(path: String, content: Data, message: String) async throws {
+    /// Internal (not private) — the Health quick-log write also needs it, for
+    /// the day nothing has created today's daily note yet.
+    func putNewFile(path: String, content: Data, message: String) async throws {
         guard let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://api.github.com/repos/\(config.owner)/\(config.repo)/contents/\(encodedPath)") else {
             throw GitHubError.badURL

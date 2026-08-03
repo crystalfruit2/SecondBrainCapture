@@ -2,54 +2,32 @@ import SwiftUI
 
 /// The mobile twin of the project registry: every active project, its status,
 /// and how much is still open on it. Read-only by design — projects change
-/// through real work in a session, not through a phone tap.
-struct ProjectsView: View {
+/// through real work in a session, not through a phone tap. Content-only:
+/// `FeaturesView` owns the shell shared across Market/Health/Projects.
+struct ProjectsContent: View {
     @EnvironmentObject var store: DashboardStore
-    @EnvironmentObject var config: AppConfig
-    @State private var showSettings = false
 
     private var projects: [ProjectSummary] { store.dashboard?.projects ?? [] }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if !projects.isEmpty {
-                    content
-                } else if !config.hasToken {
-                    DashboardPlaceholder(icon: "key.horizontal",
-                                         title: "No token yet",
-                                         message: "Add a GitHub token in Settings to see your projects.")
-                } else if store.isRefreshing {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
+        List {
+            if projects.isEmpty {
+                Section {
                     DashboardPlaceholder(icon: "square.stack.3d.up",
                                          title: "No projects",
-                                         message: store.lastError ?? "Pull down to fetch the project registry.")
+                                         message: "Pull down to fetch the project registry.")
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Projects")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+            } else {
+                Section {
+                    ForEach(projects) { project in
+                        ProjectRow(project: project)
+                            .listRowInsets(EdgeInsets())
+                    }
+                } header: {
+                    SectionHeader(title: "Active", count: projects.count).textCase(nil)
                 }
-            }
-            .sheet(isPresented: $showSettings) {
-                SettingsView().environmentObject(config)
-            }
-        }
-        .task { await store.refreshIfStale() }
-    }
-
-    private var content: some View {
-        List {
-            Section {
-                ForEach(projects) { project in
-                    ProjectRow(project: project)
-                        .listRowInsets(EdgeInsets())
-                }
-            } header: {
-                SectionHeader(title: "Active", count: projects.count).textCase(nil)
             }
         }
         .listStyle(.insetGrouped)
@@ -95,7 +73,7 @@ struct ProjectRow: View {
 }
 
 #Preview {
-    ProjectsView()
+    NavigationStack { ProjectsContent() }
         .environmentObject(DashboardStore())
         .environmentObject(AppConfig())
 }

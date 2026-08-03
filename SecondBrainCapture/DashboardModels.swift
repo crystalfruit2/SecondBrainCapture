@@ -171,6 +171,105 @@ struct ProjectSummary: Codable, Identifiable, Equatable, Hashable {
     }
 }
 
+/// One long-arc life thread, mirrored read-only from `Areas/Life-Threads.md`.
+struct CompanionThread: Codable, Identifiable, Equatable, Hashable {
+    let title: String
+    let status: String
+    let latestMovement: String?
+    let nextPull: String?
+
+    var id: String { title }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? "🔥"
+        latestMovement = try c.decodeIfPresent(String.self, forKey: .latestMovement)
+        nextPull = try c.decodeIfPresent(String.self, forKey: .nextPull)
+    }
+
+    init(title: String, status: String = "🔥", latestMovement: String? = nil, nextPull: String? = nil) {
+        self.title = title; self.status = status
+        self.latestMovement = latestMovement; self.nextPull = nextPull
+    }
+}
+
+/// One entry from `Areas/Decision-Log.md` — the choice, not the full reasoning.
+struct CompanionDecision: Codable, Identifiable, Equatable, Hashable {
+    let title: String
+    let date: String?
+    let choice: String?
+    let followUp: String?
+
+    var id: String { "\(title)|\(date ?? "")" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        date = try c.decodeIfPresent(String.self, forKey: .date)
+        choice = try c.decodeIfPresent(String.self, forKey: .choice)
+        followUp = try c.decodeIfPresent(String.self, forKey: .followUp)
+    }
+
+    init(title: String, date: String? = nil, choice: String? = nil, followUp: String? = nil) {
+        self.title = title; self.date = date; self.choice = choice; self.followUp = followUp
+    }
+}
+
+/// One live idea from `Areas/Idea-Garden.md`'s Seeds section. Dead/superseded
+/// seeds are filtered out vault-side, so anything that reaches the phone is
+/// still open.
+struct CompanionSeed: Codable, Identifiable, Equatable, Hashable {
+    let title: String
+    let summary: String?
+
+    var id: String { title }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+    }
+
+    init(title: String, summary: String? = nil) {
+        self.title = title; self.summary = summary
+    }
+}
+
+/// The three Companion organs, read-only on the phone — Claude feeds these
+/// during normal vault work, but Alp never sees them unless he opens Obsidian.
+struct CompanionData: Codable, Equatable {
+    let threads: [CompanionThread]
+    let decisions: [CompanionDecision]
+    let seeds: [CompanionSeed]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threads = try c.decodeIfPresent([CompanionThread].self, forKey: .threads) ?? []
+        decisions = try c.decodeIfPresent([CompanionDecision].self, forKey: .decisions) ?? []
+        seeds = try c.decodeIfPresent([CompanionSeed].self, forKey: .seeds) ?? []
+    }
+
+    init(threads: [CompanionThread] = [], decisions: [CompanionDecision] = [], seeds: [CompanionSeed] = []) {
+        self.threads = threads; self.decisions = decisions; self.seeds = seeds
+    }
+
+    var isEmpty: Bool { threads.isEmpty && decisions.isEmpty && seeds.isEmpty }
+}
+
+/// Today's `### Health log` bullets, mirrored read-only so the Health tab can
+/// show "already logged today" instead of feeling write-only.
+struct HealthToday: Codable, Equatable {
+    let loggedToday: [String]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        loggedToday = try c.decodeIfPresent([String].self, forKey: .loggedToday) ?? []
+    }
+
+    init(loggedToday: [String] = []) { self.loggedToday = loggedToday }
+}
+
 struct Dashboard: Codable, Equatable {
     let version: Int
     let generated: String?
@@ -179,6 +278,8 @@ struct Dashboard: Codable, Equatable {
     let agenda: [AgendaItem]
     let projects: [ProjectSummary]
     var market: [MarketItem]
+    let companion: CompanionData
+    var health: HealthToday
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -190,14 +291,18 @@ struct Dashboard: Codable, Equatable {
         projects = try c.decodeIfPresent([ProjectSummary].self, forKey: .projects) ?? []
         // Older dashboards (schema v1, pre-market-list) simply lack this key.
         market = try c.decodeIfPresent([MarketItem].self, forKey: .market) ?? []
+        // Schema v3 additions — pre-Companion/Health dashboards lack both keys.
+        companion = try c.decodeIfPresent(CompanionData.self, forKey: .companion) ?? CompanionData()
+        health = try c.decodeIfPresent(HealthToday.self, forKey: .health) ?? HealthToday()
     }
 
     init(version: Int = 1, generated: String? = nil, rocky: RockyNudge? = nil,
          tasks: [DashboardTask] = [], agenda: [AgendaItem] = [], projects: [ProjectSummary] = [],
-         market: [MarketItem] = []) {
+         market: [MarketItem] = [], companion: CompanionData = CompanionData(),
+         health: HealthToday = HealthToday()) {
         self.version = version; self.generated = generated; self.rocky = rocky
         self.tasks = tasks; self.agenda = agenda; self.projects = projects
-        self.market = market
+        self.market = market; self.companion = companion; self.health = health
     }
 
     var generatedAt: Date? {

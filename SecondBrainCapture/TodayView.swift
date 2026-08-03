@@ -1,14 +1,17 @@
 import SwiftUI
 
-/// The day at a glance: what Rocky wants Alp to know, what's overdue, what's
-/// due today, and what's next on the calendar. Read-mostly — the one action it
-/// offers is checking something off, because that's the action that matters
-/// when you're looking at your day on a phone.
+/// The day at a glance, and everything open on Alp: what Rocky wants him to
+/// know, every task bucketed (overdue/today/upcoming, tap to complete, swipe
+/// to defer), and what's next on the calendar. Merges what used to be two
+/// separate tabs (Today + Tasks) into one, since they answered overlapping
+/// questions ("what now?" vs "what's on me at all?") and the tab bar had
+/// room to give back.
 struct TodayView: View {
     @EnvironmentObject var store: DashboardStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var queue: CaptureQueue
     @State private var showSettings = false
+    @State private var showCompleted = false
     @State private var toggleFeedback = 0
     @State private var nudgeSent = false
 
@@ -37,7 +40,15 @@ struct TodayView: View {
             .navigationTitle("Today")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                    Menu {
+                        Toggle("Show completed", isOn: $showCompleted)
+                        Divider()
+                        Button { showSettings = true } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -65,8 +76,9 @@ struct TodayView: View {
                 }
             }
 
-            taskSection(board?.overdueTasks ?? [], title: "Overdue", tint: .orange)
-            taskSection(board?.todayTasks ?? [], title: "Today", tint: .secondary)
+            taskSection(.overdue, tint: .orange)
+            taskSection(.today, tint: .secondary)
+            taskSection(.upcoming, tint: .secondary)
 
             if let agenda = board?.agenda, !agenda.isEmpty {
                 Section {
@@ -83,7 +95,9 @@ struct TodayView: View {
                 Section {
                     DashboardPlaceholder(icon: "checkmark.circle",
                                          title: "You're clear",
-                                         message: "Nothing overdue, nothing due today.")
+                                         message: showCompleted
+                                            ? "Nothing overdue, nothing due today."
+                                            : "Nothing open. Turn on “Show completed” to see the rest.")
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
@@ -97,9 +111,17 @@ struct TodayView: View {
     }
 
     private var isAllClear: Bool {
-        (board?.overdueTasks.isEmpty ?? true)
-            && (board?.todayTasks.isEmpty ?? true)
+        visibleTasks(in: .overdue).isEmpty
+            && visibleTasks(in: .today).isEmpty
+            && visibleTasks(in: .upcoming).isEmpty
             && (board?.agenda.isEmpty ?? true)
+    }
+
+    /// Completed tasks are hidden by default — the point of this screen is
+    /// what's left, not what's behind. One toggle away for the satisfaction.
+    private func visibleTasks(in bucket: TaskBucket) -> [DashboardTask] {
+        let all = board?.tasks(in: bucket) ?? []
+        return showCompleted ? all : all.filter { !$0.done }
     }
 
     /// Only nudges whose vault-side copy promises "tap to ..." get a tap
@@ -141,20 +163,43 @@ struct TodayView: View {
     }
 
     @ViewBuilder
-    private func taskSection(_ tasks: [DashboardTask], title: String, tint: Color) -> some View {
+    private func taskSection(_ bucket: TaskBucket, tint: Color) -> some View {
+        let tasks = visibleTasks(in: bucket)
         if !tasks.isEmpty {
             Section {
                 ForEach(tasks) { task in
                     TaskRow(task: task) {
-                        store.setDone(task, done: !task.done)
-                        toggleFeedback += 1
+                        toggle(task)
                     }
                     .listRowInsets(EdgeInsets())
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button {
+                            toggle(task)
+                        } label: {
+                            Label(task.done ? "Reopen" : "Done",
+                                  systemImage: task.done ? "arrow.uturn.backward" : "checkmark")
+                        }
+                        .tint(task.done ? .orange : .green)
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        Button {
+                            store.postpone(task)
+                            toggleFeedback += 1
+                        } label: {
+                            Label("Defer", systemImage: "calendar.badge.clock")
+                        }
+                        .tint(.indigo)
+                    }
                 }
             } header: {
-                SectionHeader(title: title, count: tasks.count, tint: tint).textCase(nil)
+                SectionHeader(title: bucket.title, count: tasks.count, tint: tint).textCase(nil)
             }
         }
+    }
+
+    private func toggle(_ task: DashboardTask) {
+        store.setDone(task, done: !task.done)
+        toggleFeedback += 1
     }
 
     @ViewBuilder
@@ -176,4 +221,5 @@ struct TodayView: View {
     TodayView()
         .environmentObject(DashboardStore())
         .environmentObject(AppConfig())
+        .environmentObject(CaptureQueue())
 }

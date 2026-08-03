@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// The shopping list. Simplest tab in the app on purpose — one text field to
-/// add, one list to tick off, no buckets or due dates to reason about.
-struct MarketListView: View {
+/// The shopping list. Simplest section in the Features tab on purpose — one
+/// text field to add, one list to tick off, no buckets or due dates to reason
+/// about. Content-only: `FeaturesView` owns the shell (nav shell, settings,
+/// no-token/loading states) shared across Market/Health/Projects.
+struct MarketListContent: View {
     @EnvironmentObject var store: DashboardStore
-    @EnvironmentObject var config: AppConfig
-    @State private var showSettings = false
     @State private var toggleFeedback = 0
     @State private var newItemText = ""
     @FocusState private var addFieldFocused: Bool
@@ -16,40 +16,6 @@ struct MarketListView: View {
     private var doneItems: [MarketItem] { items.filter(\.done) }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if board != nil {
-                    content
-                } else if !config.hasToken {
-                    DashboardPlaceholder(icon: "key.horizontal",
-                                         title: "No token yet",
-                                         message: "Add a GitHub token in Settings to see your market list.")
-                } else if store.isRefreshing {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    DashboardPlaceholder(icon: "arrow.clockwise",
-                                         title: "Nothing loaded yet",
-                                         message: store.lastError ?? "Pull down to fetch your list.")
-                }
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Market")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: {
-                        Image(systemName: "gearshape")
-                    }
-                }
-            }
-            .sheet(isPresented: $showSettings) {
-                SettingsView().environmentObject(config)
-            }
-            .safeAreaInset(edge: .bottom) { addBar }
-        }
-        .task { await store.refreshIfStale() }
-    }
-
-    private var content: some View {
         List {
             if store.marketPendingCount > 0 {
                 Section {
@@ -107,6 +73,7 @@ struct MarketListView: View {
         .listStyle(.insetGrouped)
         .refreshable { await store.refresh() }
         .sensoryFeedback(.success, trigger: toggleFeedback)
+        .safeAreaInset(edge: .bottom) { addBar }
     }
 
     private var addBar: some View {
@@ -142,7 +109,7 @@ struct MarketListView: View {
 }
 
 #Preview {
-    MarketListView()
+    NavigationStack { MarketListContent() }
         .environmentObject(DashboardStore())
         .environmentObject(AppConfig())
 }
