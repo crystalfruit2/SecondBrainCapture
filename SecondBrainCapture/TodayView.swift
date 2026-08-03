@@ -7,8 +7,10 @@ import SwiftUI
 struct TodayView: View {
     @EnvironmentObject var store: DashboardStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var queue: CaptureQueue
     @State private var showSettings = false
     @State private var toggleFeedback = 0
+    @State private var nudgeSent = false
 
     private var board: Dashboard? { store.dashboard }
 
@@ -51,10 +53,15 @@ struct TodayView: View {
 
             if let rocky = board?.rocky {
                 Section {
-                    RockyCard(nudge: rocky)
+                    RockyCard(nudge: rocky, onTap: rockyTapAction(for: rocky))
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                } footer: {
+                    if nudgeSent {
+                        Text("Queued — Rocky will handle it in your next session.")
+                            .transition(.opacity)
+                    }
                 }
             }
 
@@ -93,6 +100,24 @@ struct TodayView: View {
         (board?.overdueTasks.isEmpty ?? true)
             && (board?.todayTasks.isEmpty ?? true)
             && (board?.agenda.isEmpty ?? true)
+    }
+
+    /// Only nudges whose vault-side copy promises "tap to ..." get a tap
+    /// action — `overdue-tasks` nudges make no such promise and stay inert.
+    /// The phone can't run a review or process the Inbox itself, so the tap
+    /// queues a capture describing the request; the next Claude session picks
+    /// it up from the Inbox and does the actual work.
+    private func rockyTapAction(for nudge: RockyNudge) -> (() -> Void)? {
+        switch nudge.kind {
+        case "review-overdue", "inbox-unprocessed":
+            return {
+                queue.enqueue("Rocky nudge tapped in the app — please handle now: \(nudge.message)")
+                nudgeSent = true
+                toggleFeedback += 1
+            }
+        default:
+            return nil
+        }
     }
 
     @ViewBuilder

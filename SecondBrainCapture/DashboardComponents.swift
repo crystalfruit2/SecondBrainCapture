@@ -166,8 +166,15 @@ struct MarketRow: View {
 
 /// The Companion showing up when Alp is *not* in a Claude session — one card,
 /// one nudge, the thing he'd otherwise miss.
+///
+/// The phone can't actually run a review or process the Inbox itself — it's a
+/// dumb sponge, all real work happens vault-side in a Claude session. So a tap
+/// on an actionable nudge (`onTap != nil`) doesn't "run" anything directly; it
+/// queues a capture through the same durable `CaptureQueue` every note goes
+/// through, which the next Claude session picks up and actually acts on.
 struct RockyCard: View {
     let nudge: RockyNudge
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -191,6 +198,12 @@ struct RockyCard: View {
             }
 
             Spacer(minLength: 4)
+
+            if onTap != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
@@ -198,6 +211,8 @@ struct RockyCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(.secondarySystemGroupedBackground))
         )
+        .contentShape(Rectangle())
+        .onTapGesture { onTap?() }
     }
 }
 
