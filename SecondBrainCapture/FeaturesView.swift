@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Market, Health and Projects share one tab so the bottom bar doesn't fill
+/// Market, Health, Projects and Finance share one tab so the bottom bar doesn't fill
 /// up with single-purpose screens — a segmented control switches between
 /// them instead of each claiming its own icon. The shell (nav chrome,
 /// settings, no-token/loading states) lives here once; each section is a
@@ -12,7 +12,7 @@ struct FeaturesView: View {
     @State private var section: Segment = .market
 
     enum Segment: String, CaseIterable, Identifiable {
-        case market = "Market", health = "Health", projects = "Projects"
+        case market = "Market", health = "Health", projects = "Projects", finance = "Finance"
         var id: String { rawValue }
     }
 
@@ -61,6 +61,7 @@ struct FeaturesView: View {
         case .market: MarketListContent()
         case .health: HealthLogContent()
         case .projects: ProjectsContent()
+        case .finance: FinanceContent()
         }
     }
 }
