@@ -16,22 +16,30 @@ struct RootView: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var queue: CaptureQueue
     @EnvironmentObject var store: DashboardStore
+    @EnvironmentObject var push: PushController
+    @State private var tab = 0
 
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             ContentView()
                 .tabItem { Label("Capture", systemImage: "mic.fill") }
+                .tag(0)
 
             TodayView()
                 .tabItem { Label("Today", systemImage: "calendar") }
                 .badge(actionableCount)
+                .tag(1)
 
             FeaturesView()
                 .tabItem { Label("Features", systemImage: "square.grid.2x2") }
+                .badge(store.dashboard?.finance?.unreadAlerts ?? 0)   // Faz S-G4a: unread Sentinel alerts
+                .tag(2)
 
             CompanionView()
                 .tabItem { Label("Companion", systemImage: "sparkles") }
+                .tag(3)
         }
+        .onChange(of: push.openFinanceTick) { _, _ in tab = 2 }
     }
 
     /// Only overdue work earns a badge. Badging everything due today would make
@@ -46,4 +54,5 @@ struct RootView: View {
         .environmentObject(AppConfig())
         .environmentObject(CaptureQueue())
         .environmentObject(DashboardStore())
+        .environmentObject(PushController.shared)
 }

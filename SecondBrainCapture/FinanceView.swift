@@ -12,6 +12,7 @@ struct FinanceContent: View {
     var body: some View {
         List {
             if let finance, !finance.isEmpty {
+                if let sentinel = finance.sentinel { sentinelSections(sentinel) }
                 headerSection(finance)
                 rulesSection(finance)
                 sicilSection(finance)
@@ -38,6 +39,68 @@ struct FinanceContent: View {
     }
 
     // MARK: sections
+
+    /// Faz S-G4a — the cloud Sentinel: today's close card, unread alerts, watcher health.
+    /// Verbatim text from the watcher (rule-card wording); no buttons, no orders.
+    @ViewBuilder
+    private func sentinelSections(_ s: FinanceSentinel) -> some View {
+        if let card = s.card {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(card.title)
+                            .font(.headline)
+                            .foregroundStyle(card.notify ? .orange : .primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        if card.stale { TaskPill(text: "bayat", style: .overdue) }
+                    }
+                    ForEach(Array(card.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                SectionHeader(title: "Kapanış kartı" + (card.date.map { " · \($0)" } ?? "")).textCase(nil)
+            }
+        }
+        if !s.alerts.isEmpty {
+            Section {
+                ForEach(s.alerts) { a in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(a.title).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                        if !a.msg.isEmpty {
+                            Text(a.msg).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let ts = a.ts { Text(ts.prefix(16).replacingOccurrences(of: "T", with: " ")).font(.caption2).foregroundStyle(.tertiary) }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                SectionHeader(title: "Okunmamış uyarılar", count: s.alerts.count, tint: .orange).textCase(nil)
+            } footer: {
+                Text("Okundu: Mac'te /finance monitor ack. Karar Alp'in.").font(.caption2)
+            }
+        }
+        Section {
+            HStack(spacing: 6) {
+                Image(systemName: (s.failures + s.pushFailures) > 0 || s.watchStale ? "exclamationmark.triangle" : "checkmark.circle")
+                    .foregroundStyle((s.failures + s.pushFailures) > 0 || s.watchStale ? .orange : .green)
+                Text(sentinelStatus(s)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func sentinelStatus(_ s: FinanceSentinel) -> String {
+        var parts = ["izleyici " + (s.checkedAt.map { String($0.prefix(16)).replacingOccurrences(of: "T", with: " ") } ?? "—")]
+        if s.failures > 0 { parts.append("\(s.failures) fiyat hatası") }
+        if s.pushFailures > 0 { parts.append("\(s.pushFailures) bildirim hatası") }
+        if s.watchStale { parts.append("watch.json bayat — Mac'te bir Claude oturumu aç") }
+        return parts.joined(separator: " · ")
+    }
 
     @ViewBuilder
     private func headerSection(_ f: FinancePayload) -> some View {

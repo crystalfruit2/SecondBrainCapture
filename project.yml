@@ -23,7 +23,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: "Rocky's Vault"
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: 3KQT8N29A9
+        DEVELOPMENT_TEAM: G7FM96CR2R   # paid team: push (Faz S-G4a). Was 3KQT8N29A9 (personal, no push)
+        CODE_SIGN_ENTITLEMENTS: SecondBrainCapture/SecondBrainCapture.entitlements
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Used to record your voice notes."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Used to transcribe your voice notes into text."
         INFOPLIST_KEY_NSCameraUsageDescription: "Used to photograph whiteboards, book pages and handwritten notes."

@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct SecondBrainCaptureApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var push = PushController.shared
     @StateObject private var config = AppConfig()
     @StateObject private var queue = CaptureQueue()
     @StateObject private var dashboard = DashboardStore()
@@ -13,6 +15,7 @@ struct SecondBrainCaptureApp: App {
                 .environmentObject(config)
                 .environmentObject(queue)
                 .environmentObject(dashboard)
+                .environmentObject(push)
                 .task {
                     // Let the queue build a service from the current config/token.
                     queue.serviceProvider = {
@@ -22,6 +25,14 @@ struct SecondBrainCaptureApp: App {
                     dashboard.serviceProvider = queue.serviceProvider
                     dashboard.dashboardPath = { config.dashboardPath }
                     dashboard.marketListPath = { config.marketListPath }
+                    // Faz S-G4a: Sentinel pushes. Permission is asked once, on launch with a token.
+                    push.serviceProvider = queue.serviceProvider
+                    push.onFinancePush = { await dashboard.refresh() }
+                    if config.hasToken { await push.requestIfNeeded() }
+                    #if DEBUG
+                    // Simulator screenshots: `xcrun simctl launch booted com.alp.SecondBrainCapture -sbcOpenFinance`
+                    if CommandLine.arguments.contains("-sbcOpenFinance") { push.openFinanceTick += 1 }
+                    #endif
                     // Drain anything left over from a previous session.
                     await queue.flush()
                     await dashboard.refreshIfStale()

@@ -8,6 +8,7 @@ import SwiftUI
 struct FeaturesView: View {
     @EnvironmentObject var store: DashboardStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var push: PushController
     @State private var showSettings = false
     @State private var section: Segment = .market
 
@@ -53,6 +54,7 @@ struct FeaturesView: View {
             }
         }
         .task { await store.refreshIfStale() }
+        .onChange(of: push.openFinanceTick) { _, _ in section = .finance }
     }
 
     @ViewBuilder
