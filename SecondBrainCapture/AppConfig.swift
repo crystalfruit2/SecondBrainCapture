@@ -14,6 +14,13 @@ final class AppConfig: ObservableObject {
     /// Repo-relative path of the market list note — a plain checklist, read via
     /// `dashboard.json` but written to directly (append/toggle).
     @Published var marketListPath: String { didSet { UserDefaults.standard.set(marketListPath, forKey: "marketListPath") } }
+    /// Repo-relative path of the To-Do list note (schema v4). Same contract as
+    /// the market list: read via the dashboard, written to directly.
+    @Published var todoListPath: String { didSet { UserDefaults.standard.set(todoListPath, forKey: "todoListPath") } }
+    /// Local To-Do reminders (dated items + morning/Monday digests).
+    @Published var remindersEnabled: Bool { didSet { UserDefaults.standard.set(remindersEnabled, forKey: "remindersEnabled") } }
+    /// Minutes past midnight for the daily digest and for dated items with no ⏰ time. Default 08:30.
+    @Published var digestMinutes: Int { didSet { UserDefaults.standard.set(digestMinutes, forKey: "digestMinutes") } }
     @Published private(set) var hasToken: Bool
 
     init() {
@@ -24,6 +31,9 @@ final class AppConfig: ObservableObject {
         folder = d.string(forKey: "folder") ?? "Inbox"
         dashboardPath = d.string(forKey: "dashboardPath") ?? "dashboard.json"
         marketListPath = d.string(forKey: "marketListPath") ?? "Areas/Market-List.md"
+        todoListPath = d.string(forKey: "todoListPath") ?? "Areas/To-Do.md"
+        remindersEnabled = d.object(forKey: "remindersEnabled") as? Bool ?? true
+        digestMinutes = d.object(forKey: "digestMinutes") as? Int ?? (8 * 60 + 30)
         hasToken = KeychainStore.loadToken() != nil
     }
 

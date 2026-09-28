@@ -25,6 +25,7 @@ struct SecondBrainCaptureApp: App {
                     dashboard.serviceProvider = queue.serviceProvider
                     dashboard.dashboardPath = { config.dashboardPath }
                     dashboard.marketListPath = { config.marketListPath }
+                    dashboard.todoListPath = { config.todoListPath }
                     // Faz S-G4a: Sentinel pushes. Permission is asked once, on launch with a token.
                     push.serviceProvider = queue.serviceProvider
                     push.onFinancePush = { await dashboard.refresh() }
@@ -36,7 +37,13 @@ struct SecondBrainCaptureApp: App {
                     // Drain anything left over from a previous session.
                     await queue.flush()
                     await dashboard.refreshIfStale()
+                    await rescheduleReminders()
                 }
+                // Local To-Do reminders follow the list: any edit, refresh or
+                // settings change rebuilds them from the cached dashboard.
+                .onChange(of: dashboard.dashboard?.todo) { _, _ in Task { await rescheduleReminders() } }
+                .onChange(of: config.remindersEnabled) { _, _ in Task { await rescheduleReminders() } }
+                .onChange(of: config.digestMinutes) { _, _ in Task { await rescheduleReminders() } }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
                     Task {
@@ -44,8 +51,15 @@ struct SecondBrainCaptureApp: App {
                         // Buckets are date-dependent: "overdue" and "today" go
                         // wrong the moment the app is reopened on a new day.
                         await dashboard.refreshIfStale()
+                        await rescheduleReminders()
                     }
                 }
         }
+    }
+
+    private func rescheduleReminders() async {
+        await TodoNotifier.shared.reschedule(items: dashboard.dashboard?.todo ?? [],
+                                             enabled: config.remindersEnabled,
+                                             digestMinutes: config.digestMinutes)
     }
 }

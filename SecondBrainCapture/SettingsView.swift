@@ -38,15 +38,27 @@ struct SettingsView: View {
                 } header: {
                     Text("Dashboard")
                 } footer: {
-                    Text("Repo-relative path of the file the vault's GitHub Action generates. The Today, Tasks and Projects tabs read only this file.")
+                    Text("Repo-relative path of the file the vault's GitHub Action generates. The To Do, Features and Companion tabs read only this file.")
                 }
 
                 Section {
-                    LabeledField("Market list", text: $config.marketListPath)
+                    LabeledField("To-do list", text: $config.todoListPath)
+                    LabeledField("Buy list", text: $config.marketListPath)
                 } header: {
-                    Text("Market list")
+                    Text("Lists")
                 } footer: {
-                    Text("Repo-relative path of the shopping list note. Read via the dashboard like everything else, but written to directly — checking off or adding an item edits this file.")
+                    Text("Repo-relative paths of the two notes behind the To Do tab. Read via the dashboard like everything else, but written to directly — ticking or adding an item edits the note.")
+                }
+
+                Section {
+                    Toggle("Reminders", isOn: $config.remindersEnabled)
+                    if config.remindersEnabled {
+                        DatePicker("Morning digest", selection: digestTime, displayedComponents: .hourAndMinute)
+                    }
+                } header: {
+                    Text("Reminders")
+                } footer: {
+                    Text("Local notifications from the To Do list: a dated item fires at its ⏰ time (or at the digest hour), plus a morning digest every day and a week-ahead line on Monday. Nothing leaves the phone.")
                 }
 
                 Section {
@@ -91,6 +103,20 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// The digest is stored as minutes-past-midnight; the picker wants a Date.
+    private var digestTime: Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(bySettingHour: config.digestMinutes / 60,
+                                      minute: config.digestMinutes % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { date in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+                config.digestMinutes = (c.hour ?? 8) * 60 + (c.minute ?? 30)
+            }
+        )
     }
 
     private func save() {

@@ -156,6 +156,30 @@ extension GitHubService {
         return comps?.url
     }
 
+    // MARK: - To-do list
+
+    /// Insert one new line under a `##` heading of a note (the To-Do list's
+    /// "add item"). Same 409 retry as `appendLine`; a 404 means the vault has
+    /// no To-Do note yet, so one is created from the template with the item
+    /// already in place.
+    func insertLine(path: String, underHeading heading: String, line: String, message: String) async throws {
+        do {
+            try await performInsert(path: path, heading: heading, line: line, message: message)
+        } catch GitHubError.badResponse(let code, _) where code == 409 {
+            try await performInsert(path: path, heading: heading, line: line, message: message)
+        } catch GitHubError.badResponse(let code, _) where code == 404 {
+            let fresh = TodoFileEditor.insert(line, under: heading, in: TodoFileEditor.template)
+            try await putNewFile(path: path, content: Data((fresh + "\n").utf8), message: message)
+        }
+    }
+
+    private func performInsert(path: String, heading: String, line: String, message: String) async throws {
+        let file = try await fetchFile(path: path)
+        let updated = TodoFileEditor.insert(line, under: heading, in: file.content)
+        guard updated != file.content else { return }
+        try await putFile(path: path, content: updated, sha: file.sha, message: message)
+    }
+
     // MARK: - Health quick-log
 
     /// Append one bullet under today's daily note's `### Health log` section,
@@ -291,10 +315,3 @@ enum TaskLineEditor {
     }
 }
 
-private extension String {
-    func trimmingTrailingWhitespace() -> String {
-        var s = self
-        while let last = s.last, last.isWhitespace { s.removeLast() }
-        return s
-    }
-}

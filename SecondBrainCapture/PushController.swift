@@ -18,6 +18,8 @@ final class PushController: NSObject, ObservableObject {
 
     /// Bumped when a finance banner is tapped; RootView/FeaturesView switch to Finance.
     @Published var openFinanceTick = 0
+    /// Bumped when a local To-Do reminder is tapped; RootView switches to To Do.
+    @Published var openTodoTick = 0
     @Published private(set) var lastError: String?
 
     var serviceProvider: (() -> GitHubService?)?
@@ -89,11 +91,17 @@ extension PushController: UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse) async {
-        let isFinance = (response.notification.request.content.userInfo["tab"] as? String) == "finance"
+        let tab = response.notification.request.content.userInfo["tab"] as? String
         await MainActor.run {
-            guard isFinance else { return }
-            self.openFinanceTick += 1
-            Task { await self.onFinancePush?() }
+            switch tab {
+            case "finance":
+                self.openFinanceTick += 1
+                Task { await self.onFinancePush?() }
+            case "todo":
+                self.openTodoTick += 1
+            default:
+                break
+            }
         }
     }
 }

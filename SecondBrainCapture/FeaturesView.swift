@@ -1,19 +1,19 @@
 import SwiftUI
 
-/// Market, Health, Projects and Finance share one tab so the bottom bar doesn't fill
+/// Health, Projects and Finance share one tab so the bottom bar doesn't fill
 /// up with single-purpose screens — a segmented control switches between
 /// them instead of each claiming its own icon. The shell (nav chrome,
 /// settings, no-token/loading states) lives here once; each section is a
-/// content-only view.
+/// content-only view. Market moved to the To Do tab's Buy segment (2026-09-28).
 struct FeaturesView: View {
     @EnvironmentObject var store: DashboardStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var push: PushController
     @State private var showSettings = false
-    @State private var section: Segment = .market
+    @State private var section: Segment = .health
 
     enum Segment: String, CaseIterable, Identifiable {
-        case market = "Market", health = "Health", projects = "Projects", finance = "Finance"
+        case health = "Health", projects = "Projects", finance = "Finance"
         var id: String { rawValue }
     }
 
@@ -60,7 +60,6 @@ struct FeaturesView: View {
     @ViewBuilder
     private var selectedContent: some View {
         switch section {
-        case .market: MarketListContent()
         case .health: HealthLogContent()
         case .projects: ProjectsContent()
         case .finance: FinanceContent()

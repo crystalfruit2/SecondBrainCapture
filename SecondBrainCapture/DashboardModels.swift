@@ -69,6 +69,30 @@ struct DashboardTask: Codable, Identifiable, Equatable, Hashable {
     }
 
     /// Short trailing label: "2d" overdue, else a weekday/date hint, else the project.
+    /// The Daily note's task lines carry a whole paragraph of Claude-written
+    /// context ("… → note · 28.09 akşam: …"). On a phone that reads as a wall
+    /// of text, so the Vault segment shows only the first clause and expands
+    /// on tap. Pure heuristics: cut at the first " → ", " · " or " — " that
+    /// comes after a few words, and drop the "(carried)" marker.
+    var shortText: String {
+        var s = text.replacingOccurrences(of: "(carried)", with: "")
+        for sep in [" → ", " · ", " — ", " ¬ "] {
+            if let r = s.range(of: sep), s.distance(from: s.startIndex, to: r.lowerBound) >= 12 {
+                s = String(s[..<r.lowerBound])
+            }
+        }
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A cut inside a parenthesis leaves "Nudge (bugün, sırayla" — drop the open clause.
+        if s.filter({ $0 == "(" }).count > s.filter({ $0 == ")" }).count,
+           let open = s.lastIndex(of: "("), s.distance(from: s.startIndex, to: open) >= 6 {
+            s = String(s[..<open])
+        }
+        while let last = s.last, ":—–-·,; ".contains(last) { s.removeLast() }
+        return s.trimmingCharacters(in: .whitespaces)
+    }
+
+    var isTruncated: Bool { shortText.count < text.trimmingCharacters(in: .whitespaces).count - 2 }
+
     var trailingPill: (text: String, style: PillStyle)? {
         if bucket == .overdue && overdueDays > 0 {
             return ("\(overdueDays)d", .overdue)
@@ -396,6 +420,165 @@ struct FinancePayload: Codable, Equatable {
     var unreadAlerts: Int { sentinel?.alerts.count ?? 0 }
 }
 
+// MARK: - To Do (schema v4, 2026-09-28)
+
+/// Which `##` section of `Areas/To-Do.md` an item lives under. Unknown values
+/// from a newer generator degrade to `.todo` rather than throwing.
+enum TodoSection: String, Codable, CaseIterable, Hashable {
+    case routine, todo, errand
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TodoSection(rawValue: raw) ?? .todo
+    }
+
+    /// The exact heading the vault note uses — new items are inserted under it.
+    var heading: String {
+        switch self {
+        case .routine: return "## Routines"
+        case .todo: return "## To do"
+        case .errand: return "## Errands"
+        }
+    }
+}
+
+enum TodoRecur: String, Codable, Hashable {
+    case daily, weekly
+}
+
+/// Where an item falls relative to the phone's clock. Computed on-device, not
+/// by CI: the runner is up to three hours stale and "today" flips at Alp's
+/// midnight, not UTC's.
+enum TodoBucket: Hashable {
+    case overdue(days: Int), today, thisWeek, later, anytime
+}
+
+struct TodoItem: Codable, Identifiable, Equatable, Hashable {
+    let id: String
+    let text: String
+    let section: TodoSection
+    let recur: TodoRecur?
+    /// CI's view of done-ness. For one-offs it's the checkbox; for routines the
+    /// phone ignores it and derives from `lastDone` (see `isDone(on:)`).
+    var done: Bool
+    var due: String?
+    let time: String?
+    var lastDone: String?
+    let file: String
+    let line: Int
+    /// The vault line as the phone believes it currently reads. Updated after
+    /// every local edit so the next edit's `expectedLine` still locates it.
+    var raw: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        section = try c.decodeIfPresent(TodoSection.self, forKey: .section) ?? .todo
+        recur = try? c.decodeIfPresent(TodoRecur.self, forKey: .recur)
+        done = try c.decodeIfPresent(Bool.self, forKey: .done) ?? false
+        due = try c.decodeIfPresent(String.self, forKey: .due)
+        time = try c.decodeIfPresent(String.self, forKey: .time)
+        lastDone = try c.decodeIfPresent(String.self, forKey: .lastDone)
+        file = try c.decodeIfPresent(String.self, forKey: .file) ?? ""
+        line = try c.decodeIfPresent(Int.self, forKey: .line) ?? 0
+        raw = try c.decodeIfPresent(String.self, forKey: .raw) ?? ""
+    }
+
+    init(id: String, text: String, section: TodoSection, recur: TodoRecur? = nil, done: Bool = false,
+         due: String? = nil, time: String? = nil, lastDone: String? = nil,
+         file: String, line: Int, raw: String) {
+        self.id = id; self.text = text; self.section = section; self.recur = recur; self.done = done
+        self.due = due; self.time = time; self.lastDone = lastDone
+        self.file = file; self.line = line; self.raw = raw
+    }
+
+    var dueDate: Date? {
+        guard let due else { return nil }
+        return DateFormatter.vaultDay.date(from: due)
+    }
+
+    var lastDoneDate: Date? {
+        guard let lastDone else { return nil }
+        return DateFormatter.vaultDay.date(from: lastDone)
+    }
+
+    /// `⏰ 10:00` → (10, 0). Nil when the marker is absent or malformed.
+    var timeComponents: (hour: Int, minute: Int)? {
+        guard let time else { return nil }
+        let parts = time.split(separator: ":")
+        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]),
+              (0...23).contains(h), (0...59).contains(m) else { return nil }
+        return (h, m)
+    }
+
+    /// Done *as of this device's clock*. A daily routine is done if stamped
+    /// today; a weekly one if stamped in the current ISO week (Mon–Sun). No
+    /// nightly reset needed — yesterday's stamp simply stops matching.
+    func isDone(on day: Date = Date()) -> Bool {
+        switch recur {
+        case .daily:
+            guard let last = lastDoneDate else { return false }
+            return Calendar.current.isDate(last, inSameDayAs: day)
+        case .weekly:
+            guard let last = lastDoneDate else { return false }
+            return TodoClock.isSameISOWeek(last, day)
+        case nil:
+            return done
+        }
+    }
+
+    func bucket(on day: Date = Date()) -> TodoBucket {
+        guard let dueDate else { return .anytime }
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: day)
+        let dueStart = cal.startOfDay(for: dueDate)
+        if dueStart < start {
+            return .overdue(days: cal.dateComponents([.day], from: dueStart, to: start).day ?? 1)
+        }
+        if dueStart == start { return .today }
+        if TodoClock.isSameISOWeek(dueStart, day) { return .thisWeek }
+        return .later
+    }
+
+    /// When a reminder should fire: the item's own `⏰` time on its due day, or
+    /// the caller's default hour when it only has a date.
+    func reminderDate(defaultMinutes: Int) -> Date? {
+        guard let dueDate else { return nil }
+        let cal = Calendar.current
+        let h = timeComponents?.hour ?? defaultMinutes / 60
+        let m = timeComponents?.minute ?? defaultMinutes % 60
+        return cal.date(bySettingHour: h, minute: m, second: 0, of: dueDate)
+    }
+}
+
+/// ISO-week arithmetic in one place, so "this week" means the same thing for
+/// bucketing, weekly routines and the Monday digest.
+enum TodoClock {
+    static var iso: Calendar {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = .current
+        return cal
+    }
+
+    static func isSameISOWeek(_ a: Date, _ b: Date) -> Bool {
+        let ca = iso.dateComponents([.yearForWeekOfYear, .weekOfYear], from: a)
+        let cb = iso.dateComponents([.yearForWeekOfYear, .weekOfYear], from: b)
+        return ca.yearForWeekOfYear == cb.yearForWeekOfYear && ca.weekOfYear == cb.weekOfYear
+    }
+
+    /// Next Monday strictly after `day` (or `day` itself at the given time when
+    /// that moment is still ahead).
+    static func nextMonday(after day: Date, atMinutes minutes: Int) -> Date? {
+        let cal = iso
+        var comps = DateComponents()
+        comps.weekday = 2   // Monday in the ISO calendar's Gregorian weekday numbering
+        comps.hour = minutes / 60
+        comps.minute = minutes % 60
+        return cal.nextDate(after: day, matching: comps, matchingPolicy: .nextTime)
+    }
+}
+
 struct Dashboard: Codable, Equatable {
     let version: Int
     let generated: String?
@@ -404,6 +587,9 @@ struct Dashboard: Codable, Equatable {
     let agenda: [AgendaItem]
     let projects: [ProjectSummary]
     var market: [MarketItem]
+    /// Schema v4 `todo` key (2026-09-28): Alp's own list from `Areas/To-Do.md`.
+    var todo: [TodoItem]
+    let todoFile: String?
     let companion: CompanionData
     var health: HealthToday
     /// Schema v3 `finance` key (2026-09-12); older dashboards lack it → nil.
@@ -419,6 +605,10 @@ struct Dashboard: Codable, Equatable {
         projects = try c.decodeIfPresent([ProjectSummary].self, forKey: .projects) ?? []
         // Older dashboards (schema v1, pre-market-list) simply lack this key.
         market = try c.decodeIfPresent([MarketItem].self, forKey: .market) ?? []
+        // Schema v4: `"todo": {"file": …, "items": […]}` — pre-To-Do dashboards lack it.
+        let todoPayload = try c.decodeIfPresent(TodoPayload.self, forKey: .todo)
+        todo = todoPayload?.items ?? []
+        todoFile = todoPayload?.file
         // Schema v3 additions — pre-Companion/Health dashboards lack both keys.
         companion = try c.decodeIfPresent(CompanionData.self, forKey: .companion) ?? CompanionData()
         health = try c.decodeIfPresent(HealthToday.self, forKey: .health) ?? HealthToday()
@@ -427,12 +617,47 @@ struct Dashboard: Codable, Equatable {
 
     init(version: Int = 1, generated: String? = nil, rocky: RockyNudge? = nil,
          tasks: [DashboardTask] = [], agenda: [AgendaItem] = [], projects: [ProjectSummary] = [],
-         market: [MarketItem] = [], companion: CompanionData = CompanionData(),
+         market: [MarketItem] = [], todo: [TodoItem] = [], todoFile: String? = nil,
+         companion: CompanionData = CompanionData(),
          health: HealthToday = HealthToday(), finance: FinancePayload? = nil) {
         self.version = version; self.generated = generated; self.rocky = rocky
         self.tasks = tasks; self.agenda = agenda; self.projects = projects
-        self.market = market; self.companion = companion; self.health = health
+        self.market = market; self.todo = todo; self.todoFile = todoFile
+        self.companion = companion; self.health = health
         self.finance = finance
+    }
+
+    /// Re-wrap for the encoder so the cache round-trips through the same
+    /// `{"file", "items"}` shape CI writes.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encodeIfPresent(generated, forKey: .generated)
+        try c.encodeIfPresent(rocky, forKey: .rocky)
+        try c.encode(tasks, forKey: .tasks)
+        try c.encode(agenda, forKey: .agenda)
+        try c.encode(projects, forKey: .projects)
+        try c.encode(market, forKey: .market)
+        try c.encode(TodoPayload(file: todoFile, items: todo), forKey: .todo)
+        try c.encode(companion, forKey: .companion)
+        try c.encode(health, forKey: .health)
+        try c.encodeIfPresent(finance, forKey: .finance)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, generated, rocky, tasks, agenda, projects, market, todo, companion, health, finance
+    }
+
+    /// The wire shape of the `todo` key.
+    struct TodoPayload: Codable {
+        let file: String?
+        let items: [TodoItem]
+        init(file: String?, items: [TodoItem]) { self.file = file; self.items = items }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            file = try c.decodeIfPresent(String.self, forKey: .file)
+            items = try c.decodeIfPresent([TodoItem].self, forKey: .items) ?? []
+        }
     }
 
     var generatedAt: Date? {

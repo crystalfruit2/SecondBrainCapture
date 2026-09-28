@@ -83,6 +83,48 @@ struct PendingMarketAction: Codable, Identifiable, Equatable {
     }
 }
 
+/// A To-Do list edit that hasn't reached GitHub yet. Three write kinds: add
+/// (insert under a section heading), done (checkbox for one-offs, ✅ stamp for
+/// routines — decided at flush time from `recur`) and postpone.
+struct PendingTodoAction: Codable, Identifiable, Equatable {
+    enum Kind: Codable, Equatable {
+        case add(TodoSection)
+        case setDone(Bool)
+        case postpone(String)   // yyyy-MM-dd
+    }
+
+    let id: UUID
+    let itemID: String
+    let file: String
+    let line: Int
+    let raw: String
+    let text: String
+    let recur: TodoRecur?
+    let kind: Kind
+    let createdAt: Date
+
+    init(itemID: String, file: String, line: Int, raw: String, text: String, recur: TodoRecur?, kind: Kind) {
+        self.id = UUID()
+        self.itemID = itemID
+        self.file = file
+        self.line = line
+        self.raw = raw
+        self.text = text
+        self.recur = recur
+        self.kind = kind
+        self.createdAt = Date()
+    }
+
+    var commitMessage: String {
+        let short = text.prefix(60)
+        switch kind {
+        case .add(let section): return "mobile: add \(section.rawValue) — \(short)"
+        case .setDone(let done): return "mobile: \(done ? "done" : "undo") \(short)"
+        case .postpone(let day): return "mobile: defer \(short) → \(day)"
+        }
+    }
+}
+
 /// A Health quick-log entry that hasn't reached GitHub yet. Simpler still than
 /// market's — always an append, never a toggle, and never collapsed with a
 /// sibling, since each tap is its own plain-text moment ("logged plainly, no
@@ -115,6 +157,7 @@ final class DashboardStore: ObservableObject {
     @Published private(set) var pending: [PendingTaskAction] = []
     @Published private(set) var marketPending: [PendingMarketAction] = []
     @Published private(set) var healthPending: [PendingHealthAction] = []
+    @Published private(set) var todoPending: [PendingTodoAction] = []
 
     /// Supplies a configured service, or nil when there's no token yet.
     var serviceProvider: () -> GitHubService? = { nil }
@@ -122,6 +165,8 @@ final class DashboardStore: ObservableObject {
     var dashboardPath: () -> String = { "dashboard.json" }
     /// Repo-relative path of the market list note.
     var marketListPath: () -> String = { "Areas/Market-List.md" }
+    /// Repo-relative path of the To-Do list note.
+    var todoListPath: () -> String = { "Areas/To-Do.md" }
     /// Repo-relative path of *today's* daily note — the Health log's home.
     var todayNotePath: () -> String = { "Daily/\(DateFormatter.vaultDay.string(from: Date())).md" }
 
@@ -130,15 +175,18 @@ final class DashboardStore: ObservableObject {
     private let queueURL: URL
     private let marketQueueURL: URL
     private let healthQueueURL: URL
+    private let todoQueueURL: URL
     private var isFlushing = false
     private var isFlushingMarket = false
     private var isFlushingHealth = false
+    private var isFlushingTodo = false
     /// How long a cached dashboard stays good enough to skip a network round-trip.
     private let staleAfter: TimeInterval = 5 * 60
 
     var pendingCount: Int { pending.count }
     var marketPendingCount: Int { marketPending.count }
     var healthPendingCount: Int { healthPending.count }
+    var todoPendingCount: Int { todoPending.count }
     var hasLoaded: Bool { dashboard != nil }
 
     init() {
@@ -149,10 +197,12 @@ final class DashboardStore: ObservableObject {
         queueURL = dir.appendingPathComponent("task-actions.json")
         marketQueueURL = dir.appendingPathComponent("market-actions.json")
         healthQueueURL = dir.appendingPathComponent("health-actions.json")
+        todoQueueURL = dir.appendingPathComponent("todo-actions.json")
         loadCache()
         loadQueue()
         loadMarketQueue()
         loadHealthQueue()
+        loadTodoQueue()
 
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
@@ -160,6 +210,7 @@ final class DashboardStore: ObservableObject {
                 await self?.flush()
                 await self?.flushMarket()
                 await self?.flushHealth()
+                await self?.flushTodo()
             }
         }
         monitor.start(queue: DispatchQueue(label: "com.alp.SecondBrainCapture.dashboard"))
@@ -180,6 +231,7 @@ final class DashboardStore: ObservableObject {
             fresh.tasks = applyPending(to: fresh.tasks)
             fresh.market = applyPendingMarket(to: fresh.market)
             fresh.health = applyPendingHealth(to: fresh.health)
+            fresh.todo = applyPendingTodo(to: fresh.todo)
             dashboard = fresh
             lastLoaded = Date()
             lastError = nil
@@ -196,12 +248,14 @@ final class DashboardStore: ObservableObject {
             await flush()
             await flushMarket()
             await flushHealth()
+            await flushTodo()
             return
         }
         await refresh()
         await flush()
         await flushMarket()
         await flushHealth()
+        await flushTodo()
     }
 
     // MARK: - Writing
@@ -387,6 +441,110 @@ final class DashboardStore: ObservableObject {
         return true
     }
 
+    // MARK: - Writing (to-do list)
+
+    /// Add an item under a section, optimistically and offline-first like the
+    /// market list. `due`/`time` become `📅`/`⏰` markers on the line — the
+    /// same markers the vault (and the phone's reminders) already understand.
+    func addTodo(_ text: String, section: TodoSection, due: Date? = nil,
+                 time: (hour: Int, minute: Int)? = nil, recur: TodoRecur? = nil) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let path = todoListPath()
+        let raw = TodoLineEditor.newLine(text: trimmed, due: due, time: time, recur: recur)
+        let tempID = UUID().uuidString
+        let item = TodoItem(id: tempID, text: trimmed, section: section, recur: recur, done: false,
+                            due: due.map { DateFormatter.vaultDay.string(from: $0) },
+                            time: time.map { String(format: "%02d:%02d", $0.hour, $0.minute) },
+                            file: path, line: 0, raw: raw)
+
+        if var board = dashboard {
+            board.todo.append(item)
+            dashboard = board
+            saveCache(board)
+        }
+        enqueueTodo(PendingTodoAction(itemID: tempID, file: path, line: 0, raw: raw,
+                                      text: trimmed, recur: recur, kind: .add(section)))
+    }
+
+    /// Tick or untick. For a routine this stamps/unstamps `✅ today` and the
+    /// checkbox is left alone; for a one-off it flips the checkbox.
+    func setTodoDone(_ item: TodoItem, done: Bool) {
+        let today = DateFormatter.vaultDay.string(from: Date())
+        mutateTodo(itemID: item.id) { current in
+            var next = current
+            if current.recur != nil {
+                next.lastDone = done ? today : nil
+                next.raw = TodoLineEditor.setDoneStamp(current.raw, date: done ? Date() : nil)
+            } else {
+                next.done = done
+                next.raw = TaskLineEditor.setDone(current.raw, done: done)
+            }
+            return next
+        }
+        enqueueTodo(PendingTodoAction(itemID: item.id, file: item.file, line: item.line, raw: item.raw,
+                                      text: item.text, recur: item.recur, kind: .setDone(done)))
+    }
+
+    /// Push a one-off's due date out (default: tomorrow).
+    func postponeTodo(_ item: TodoItem, to date: Date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()) {
+        guard item.recur == nil else { return }
+        let day = DateFormatter.vaultDay.string(from: date)
+        mutateTodo(itemID: item.id) { current in
+            var next = current
+            next.due = day
+            next.raw = TaskLineEditor.setDue(current.raw, to: date)
+            return next
+        }
+        enqueueTodo(PendingTodoAction(itemID: item.id, file: item.file, line: item.line, raw: item.raw,
+                                      text: item.text, recur: item.recur, kind: .postpone(day)))
+    }
+
+    @discardableResult
+    func flushTodo() async -> Bool {
+        guard !isFlushingTodo, !todoPending.isEmpty, let service = serviceProvider() else {
+            return todoPending.isEmpty
+        }
+        isFlushingTodo = true
+        defer { isFlushingTodo = false }
+
+        while let action = todoPending.first {
+            do {
+                switch action.kind {
+                case .add(let section):
+                    try await service.insertLine(path: action.file, underHeading: section.heading,
+                                                 line: action.raw, message: action.commitMessage)
+                case .setDone(let done):
+                    try await service.editLine(path: action.file, lineNumber: action.line,
+                                               expectedLine: action.raw,
+                                               message: action.commitMessage) { line in
+                        action.recur != nil
+                            ? TodoLineEditor.setDoneStamp(line, date: done ? action.createdAt : nil)
+                            : TaskLineEditor.setDone(line, done: done)
+                    }
+                case .postpone(let day):
+                    try await service.editLine(path: action.file, lineNumber: action.line,
+                                               expectedLine: action.raw,
+                                               message: action.commitMessage) { line in
+                        guard let date = DateFormatter.vaultDay.date(from: day) else { return line }
+                        return TaskLineEditor.setDue(line, to: date)
+                    }
+                }
+                todoPending.removeFirst()
+                saveTodoQueue()
+                lastError = nil
+            } catch GitHubError.badResponse(let code, let msg) where code == 422 {
+                todoPending.removeFirst()
+                saveTodoQueue()
+                lastError = msg
+            } catch {
+                lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                return false
+            }
+        }
+        return true
+    }
+
     // MARK: - Internals
 
     private func enqueue(_ action: PendingTaskAction) {
@@ -484,6 +642,77 @@ final class DashboardStore: ObservableObject {
         return result
     }
 
+    /// Queue a to-do edit. Repeated toggles of one item collapse into the
+    /// newest, but the newest inherits the *older* action's `raw` — that's the
+    /// line the vault still has, since the collapsed action never committed.
+    /// Different kinds never collapse (an `.add` must survive a `.setDone`
+    /// queued right behind it).
+    private func enqueueTodo(_ action: PendingTodoAction) {
+        var next = action
+        if let older = todoPending.first(where: { $0.itemID == action.itemID && sameTodoKindFamily($0.kind, action.kind) }) {
+            next = PendingTodoAction(itemID: action.itemID, file: action.file, line: older.line, raw: older.raw,
+                                     text: action.text, recur: action.recur, kind: action.kind)
+            todoPending.removeAll { $0.id == older.id }
+        }
+        todoPending.append(next)
+        saveTodoQueue()
+        Task { await flushTodo() }
+    }
+
+    private func sameTodoKindFamily(_ a: PendingTodoAction.Kind, _ b: PendingTodoAction.Kind) -> Bool {
+        switch (a, b) {
+        case (.setDone, .setDone), (.postpone, .postpone): return true
+        default: return false
+        }
+    }
+
+    private func mutateTodo(itemID: String, _ transform: (TodoItem) -> TodoItem) {
+        guard var board = dashboard,
+              let index = board.todo.firstIndex(where: { $0.id == itemID }) else { return }
+        board.todo[index] = transform(board.todo[index])
+        dashboard = board
+        saveCache(board)
+    }
+
+    /// Replay unsynced to-do edits over a fresh list. A pending `.add` has no
+    /// counterpart yet (CI hasn't reindexed) and is re-appended, like market.
+    private func applyPendingTodo(to items: [TodoItem]) -> [TodoItem] {
+        guard !todoPending.isEmpty else { return items }
+        var result = items
+        for action in todoPending {
+            guard let index = result.firstIndex(where: { $0.id == action.itemID }) else {
+                if case .add(let section) = action.kind {
+                    // Rebuild the optimistic row from its own line (the line carries the markers).
+                    let dueRange = action.raw.range(of: #"\d{4}-\d{2}-\d{2}"#, options: .regularExpression)
+                    let timeRange = action.raw.range(of: #"⏰\s*\d{1,2}:\d{2}"#, options: .regularExpression)
+                    result.append(TodoItem(id: action.itemID, text: action.text, section: section, recur: action.recur,
+                                           done: false,
+                                           due: dueRange.map { String(action.raw[$0]) },
+                                           time: timeRange.map { String(action.raw[$0]).replacingOccurrences(of: "⏰", with: "").trimmingCharacters(in: .whitespaces) },
+                                           file: action.file, line: 0, raw: action.raw))
+                }
+                continue
+            }
+            var t = result[index]
+            switch action.kind {
+            case .add: break
+            case .setDone(let done):
+                if t.recur != nil {
+                    t.lastDone = done ? DateFormatter.vaultDay.string(from: action.createdAt) : nil
+                    t.raw = TodoLineEditor.setDoneStamp(t.raw, date: done ? action.createdAt : nil)
+                } else {
+                    t.done = done
+                    t.raw = TaskLineEditor.setDone(t.raw, done: done)
+                }
+            case .postpone(let day):
+                t.due = day
+                if let date = DateFormatter.vaultDay.date(from: day) { t.raw = TaskLineEditor.setDue(t.raw, to: date) }
+            }
+            result[index] = t
+        }
+        return result
+    }
+
     /// Replay unsynced logs over a freshly fetched "today" list — a still-
     /// pending entry has no counterpart there yet (CI hasn't reindexed), so
     /// it's added rather than skipped, same reasoning as market's `.add`.
@@ -542,5 +771,16 @@ final class DashboardStore: ObservableObject {
     private func saveHealthQueue() {
         guard let data = try? JSONEncoder().encode(healthPending) else { return }
         try? data.write(to: healthQueueURL, options: .atomic)
+    }
+
+    private func loadTodoQueue() {
+        guard let data = try? Data(contentsOf: todoQueueURL),
+              let items = try? JSONDecoder().decode([PendingTodoAction].self, from: data) else { return }
+        todoPending = items
+    }
+
+    private func saveTodoQueue() {
+        guard let data = try? JSONEncoder().encode(todoPending) else { return }
+        try? data.write(to: todoQueueURL, options: .atomic)
     }
 }

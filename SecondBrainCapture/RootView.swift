@@ -7,11 +7,11 @@ import SwiftUI
 /// friction capture stays exactly where his thumb expects it — everything the
 /// dashboard adds is read-and-act, which can afford one extra tap.
 ///
-/// Today absorbs what used to be a separate Tasks tab (same overdue/today/
-/// upcoming buckets, just one screen instead of two with overlapping
-/// questions). Market, Health and Projects share a single Features tab with
-/// an in-tab segmented switch, rather than each claiming its own icon — the
-/// bar was heading toward seven icons before this consolidation.
+/// To Do (2026-09-28) replaces the old Today tab: Alp's own lists (today /
+/// week / errands / buy) in front, the Daily-note work tasks behind a Vault
+/// segment. Health, Projects and Finance share a single Features tab with an
+/// in-tab segmented switch, rather than each claiming its own icon — the bar
+/// was heading toward seven icons before this consolidation.
 struct RootView: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var queue: CaptureQueue
@@ -25,8 +25,8 @@ struct RootView: View {
                 .tabItem { Label("Capture", systemImage: "mic.fill") }
                 .tag(0)
 
-            TodayView()
-                .tabItem { Label("Today", systemImage: "calendar") }
+            TodoView()
+                .tabItem { Label("To Do", systemImage: "checklist") }
                 .badge(actionableCount)
                 .tag(1)
 
@@ -40,12 +40,24 @@ struct RootView: View {
                 .tag(3)
         }
         .onChange(of: push.openFinanceTick) { _, _ in tab = 2 }
+        .onChange(of: push.openTodoTick) { _, _ in tab = 1 }
+        .onAppear {
+            #if DEBUG
+            if CommandLine.arguments.contains("-sbcTodoSegment") { tab = 1 }   // simulator screenshots
+            #endif
+        }
     }
 
     /// Only overdue work earns a badge. Badging everything due today would make
     /// the app nag on a day that's going fine.
     private var actionableCount: Int {
-        store.dashboard?.overdueTasks.filter { !$0.done }.count ?? 0
+        let vault = store.dashboard?.overdueTasks.filter { !$0.done }.count ?? 0
+        let own = (store.dashboard?.todo ?? []).filter { item in
+            guard item.recur == nil, !item.isDone() else { return false }
+            if case .overdue = item.bucket() { return true }
+            return false
+        }.count
+        return vault + own
     }
 }
 
