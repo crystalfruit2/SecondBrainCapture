@@ -52,4 +52,18 @@ final class AppConfig: ObservableObject {
     var githubConfig: GitHubConfig {
         GitHubConfig(owner: owner, repo: repo, branch: branch, folder: folder)
     }
+
+    /// A service built straight from the persisted settings — same keys and
+    /// defaults as `init()`. For code that can run before any view exists
+    /// (the expense intent, launched in the background by Shortcuts), where
+    /// the instance the root view owns hasn't been wired up. Nil without a token.
+    nonisolated static func storedService() -> GitHubService? {
+        guard let token = KeychainStore.loadToken(), !token.isEmpty else { return nil }
+        let d = UserDefaults.standard
+        return GitHubService(config: GitHubConfig(owner: d.string(forKey: "owner") ?? "crystalfruit2",
+                                                  repo: d.string(forKey: "repo") ?? "second_brain",
+                                                  branch: d.string(forKey: "branch") ?? "main",
+                                                  folder: d.string(forKey: "folder") ?? "Inbox"),
+                             token: token)
+    }
 }

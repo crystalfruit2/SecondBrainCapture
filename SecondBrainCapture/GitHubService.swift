@@ -93,7 +93,18 @@ struct GitHubService {
     /// retry must not deadlock the queue on a file we ourselves just wrote.
     /// Internal (not private) — the Health quick-log write also needs it, for
     /// the day nothing has created today's daily note yet.
-    func putNewFile(path: String, content: Data, message: String) async throws {
+    /// `timeout` shortens the request for callers on a clock (the expense
+    /// intent has ~30 s in the background); nil keeps URLSession's default.
+    ///
+    /// `pathIsUnique`: GitHub answers a create on an existing path with 422
+    /// `"sha" wasn't supplied` (measured 2026-10-06), not "already exists".
+    /// Pass true only when the path can hold nothing but this exact content
+    /// (it embeds a unique id) — then that answer means an earlier attempt
+    /// already landed. For a shared path (a daily note, the To-Do list) it
+    /// means someone else created the file first, and must stay an error so
+    /// the caller retries and appends instead of dropping its line.
+    func putNewFile(path: String, content: Data, message: String, timeout: TimeInterval? = nil,
+                    pathIsUnique: Bool = false) async throws {
         guard let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://api.github.com/repos/\(config.owner)/\(config.repo)/contents/\(encodedPath)") else {
             throw GitHubError.badURL
@@ -108,14 +119,21 @@ struct GitHubService {
         var req = authedRequest(url: url, method: "PUT")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let timeout { req.timeoutInterval = timeout }
 
         let (data, resp) = try await URLSession.shared.data(for: req)
         do {
             try Self.check(resp, data)
         } catch GitHubError.badResponse(let code, let msg)
-                    where code == 422 && msg.lowercased().contains("already exists") {
+                    where code == 422 && Self.meansAlreadyThere(msg, pathIsUnique: pathIsUnique) {
             return
         }
+    }
+
+    /// Whether a 422 on a create means "that file is already in the repo".
+    static func meansAlreadyThere(_ message: String, pathIsUnique: Bool) -> Bool {
+        let m = message.lowercased()
+        return m.contains("already exists") || (pathIsUnique && m.contains("\"sha\" wasn't supplied"))
     }
 
     // MARK: - Helpers

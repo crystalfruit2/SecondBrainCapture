@@ -6,11 +6,13 @@ import SwiftUI
 /// shown exactly as the vault wrote them.
 struct FinanceContent: View {
     @EnvironmentObject var store: DashboardStore
+    @ObservedObject private var expenses = ExpenseStore.shared
 
     private var finance: FinancePayload? { store.dashboard?.finance }
 
     var body: some View {
         List {
+            spendingSections(finance?.spending)
             if let finance, !finance.isEmpty {
                 if let sentinel = finance.sentinel { sentinelSections(sentinel) }
                 headerSection(finance)
@@ -35,10 +37,154 @@ struct FinanceContent: View {
             }
         }
         .listStyle(.insetGrouped)
-        .refreshable { await store.refresh() }
+        .refreshable {
+            await expenses.flush()
+            await store.refresh()
+        }
     }
 
     // MARK: sections
+
+    /// Spending — the one part of Finance this phone also feeds. Two views on
+    /// purpose: the vault's month (totals, categories, everything in the
+    /// ledger incl. cash typed on the Mac) and this phone's own log, which is
+    /// the only place that can say "that tap is still waiting to sync".
+    @ViewBuilder
+    private func spendingSections(_ s: SpendingPayload?) -> some View {
+        if expenses.pendingCount > 0 {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    PendingSyncBadge(count: expenses.pendingCount, noun: "payment")
+                    if let error = expenses.lastError {
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12)
+                    }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        }
+        if let s, s.count == 0, !s.warnings.isEmpty {
+            Section {
+                ForEach(s.warnings, id: \.self) { w in
+                    Text(w).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
+            } header: {
+                SectionHeader(title: "Spending").textCase(nil)
+            }
+        }
+        if let s, s.count > 0 {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(s.symbol + s.total)
+                            .font(.title2.weight(.bold))
+                            .monospacedDigit()
+                        Spacer()
+                        TaskPill(text: s.countLine, style: .date)
+                    }
+                    if let line = s.budgetLine {
+                        Text(line)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !s.byCategory.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(s.byCategory.prefix(6)) { c in
+                                HStack(spacing: 8) {
+                                    Text(c.name).font(.caption).foregroundStyle(.secondary)
+                                    Spacer(minLength: 0)
+                                    Text("\(c.count)×").font(.caption2).foregroundStyle(.tertiary)
+                                    Text(c.total).font(.caption.weight(.semibold)).monospacedDigit()
+                                }
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+                    ForEach(s.warnings, id: \.self) { w in
+                        Text(w)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .listRowInsets(EdgeInsets())
+                ForEach(s.recent.prefix(8)) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(row.shortDate)
+                            .font(.footnote.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(row.merchant.isEmpty ? "—" : row.merchant)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Text(row.category.isEmpty ? row.time : "\(row.time) · \(row.category)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Text(row.amount)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(row.amount == "?" ? .orange : .primary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .listRowInsets(EdgeInsets())
+                }
+            } header: {
+                SectionHeader(title: "Spending · \(s.label)").textCase(nil)
+            } footer: {
+                if let note = s.note { Text(note).font(.caption2) }
+            }
+        }
+
+        Section {
+            if expenses.entries.isEmpty {
+                Text("No payments logged from this phone yet. In Shortcuts, add a Wallet (Transaction) automation for your card that runs “Log Expense”.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(expenses.entries.prefix(6)) { e in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Image(systemName: e.synced ? "checkmark.circle.fill" : "clock.arrow.circlepath")
+                            .font(.footnote)
+                            .foregroundStyle(e.synced ? Color.green : Color.orange)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(e.merchant.isEmpty ? "Unknown place" : e.merchant)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Text(e.createdAt.formatted(date: .abbreviated, time: .shortened)
+                                 + (e.synced ? "" : " · waiting to sync"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Text(e.rawAmount.isEmpty ? "?" : e.rawAmount)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(e.amount == nil ? .orange : .primary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .listRowInsets(EdgeInsets())
+                }
+            }
+        } header: {
+            SectionHeader(title: "Logged on this phone",
+                          count: expenses.pendingCount > 0 ? expenses.pendingCount : nil,
+                          tint: expenses.pendingCount > 0 ? .orange : .secondary).textCase(nil)
+        }
+    }
 
     /// Faz S-G4a — the cloud Sentinel: today's close card, unread alerts, watcher health.
     /// Verbatim text from the watcher (rule-card wording); no buttons, no orders.

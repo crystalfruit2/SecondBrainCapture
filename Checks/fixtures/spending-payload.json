@@ -1,0 +1,122 @@
+{
+ "month": "2026-10",
+ "label": "Ekim 2026",
+ "currency": "EUR",
+ "symbol": "€",
+ "total": "98,00",
+ "count": 9,
+ "countLine": "9 işlem",
+ "budgetLine": "aylık ödeme €1.000,00 → kalan €902,00",
+ "byCategory": [
+  {
+   "name": "ulaşım",
+   "total": "49,00",
+   "count": 1
+  },
+  {
+   "name": "market",
+   "total": "27,90",
+   "count": 2
+  },
+  {
+   "name": "kategorisiz",
+   "total": "18,00",
+   "count": 1
+  },
+  {
+   "name": "yemek",
+   "total": "3,10",
+   "count": 1
+  }
+ ],
+ "recent": [
+  {
+   "id": "E5F60718-0000-4000-8000-000000000005",
+   "date": "2026-10-06",
+   "time": "12:30",
+   "merchant": "Zabka",
+   "amount": "7,00 ZŁ",
+   "currency": "ZŁ",
+   "category": ""
+  },
+  {
+   "id": "D4E5F607-0000-4000-8000-000000000004",
+   "date": "2026-10-06",
+   "time": "11:30",
+   "merchant": "Online Shop Inc",
+   "amount": "12,00 USD",
+   "currency": "USD",
+   "category": ""
+  },
+  {
+   "id": "C3D4E5F6-0000-4000-8000-000000000003",
+   "date": "2026-10-06",
+   "time": "10:30",
+   "merchant": "Stadtbäckerei Schmidt",
+   "amount": "?",
+   "currency": "EUR",
+   "category": "yemek"
+  },
+  {
+   "id": "B2C3D4E5-0000-4000-8000-000000000002",
+   "date": "2026-10-06",
+   "time": "09:30",
+   "merchant": "",
+   "amount": "?",
+   "currency": "EUR",
+   "category": ""
+  },
+  {
+   "id": "A1B2C3D4-0000-4000-8000-000000000001",
+   "date": "2026-10-06",
+   "time": "09:30",
+   "merchant": "REWE Markt GmbH",
+   "amount": "4,50",
+   "currency": "EUR",
+   "category": "market"
+  },
+  {
+   "id": "m-c5243365c1",
+   "date": "2026-10-05",
+   "time": "18:12",
+   "merchant": "ALDI Nord",
+   "amount": "23,40",
+   "currency": "EUR",
+   "category": "market"
+  },
+  {
+   "id": "m-e4d2ddec0c",
+   "date": "2026-10-05",
+   "time": "12:40",
+   "merchant": "Mensa Zentralmensa",
+   "amount": "3,10",
+   "currency": "EUR",
+   "category": "yemek"
+  },
+  {
+   "id": "m-a99e80ec9c",
+   "date": "2026-10-04",
+   "time": "11:00",
+   "merchant": "Flohmarkt",
+   "amount": "18,00",
+   "currency": "EUR",
+   "category": ""
+  },
+  {
+   "id": "m-ee34933772",
+   "date": "2026-10-02",
+   "time": "09:05",
+   "merchant": "KVG Deutschlandticket",
+   "amount": "49,00",
+   "currency": "EUR",
+   "category": "ulaşım"
+  }
+ ],
+ "warnings": [
+  "2 işlemde tutar okunamadı (toplama girmedi)",
+  "USD 12,00 · 1 işlem toplama girmedi",
+  "ZŁ 7,00 · 1 işlem toplama girmedi"
+ ],
+ "note": "kart + elle girilen; SEPA (kira, havale) yok",
+ "source": "Areas/Finance/expenses/2026-10.csv"
+}

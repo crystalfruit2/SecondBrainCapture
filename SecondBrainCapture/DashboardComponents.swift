@@ -293,11 +293,13 @@ struct DashboardErrorBanner: View {
 }
 
 /// "3 edits waiting to sync" — the read-side twin of the capture queue's badge.
+/// `noun` names what is waiting when "edit" would be wrong (a logged payment).
 struct PendingSyncBadge: View {
     let count: Int
+    var noun: String = "edit"
 
     var body: some View {
-        Label("^[\(count) edit](inflect: true) waiting to sync…", systemImage: "arrow.triangle.2.circlepath")
+        Label("^[\(count) \(noun)](inflect: true) waiting to sync…", systemImage: "arrow.triangle.2.circlepath")
             .font(.caption)
             .foregroundStyle(.orange)
             .frame(maxWidth: .infinity, alignment: .leading)
