@@ -377,6 +377,7 @@ private struct TodayList: View {
         switch nudge.kind {
         case "review-overdue", "inbox-unprocessed":
             return {
+                guard !nudgeSent else { return }   // one tap = one capture, not one per tap
                 queue.enqueue("Rocky nudge tapped in the app — please handle now: \(nudge.message)")
                 nudgeSent = true
                 feedback += 1

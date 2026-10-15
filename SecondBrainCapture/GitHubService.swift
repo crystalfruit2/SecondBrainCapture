@@ -67,7 +67,8 @@ struct GitHubService {
         let markdown = Self.makeMarkdown(from: text, date: date, imageName: imageName)
         try await putNewFile(path: "\(config.folder)/\(filename)",
                              content: Data(markdown.utf8),
-                             message: "mobile capture: \(filename)")
+                             message: "mobile capture: \(filename)",
+                             pathIsUnique: true)   // second-precision stamp + slug: only this capture lands here
         return filename
     }
 
@@ -81,7 +82,8 @@ struct GitHubService {
         guard !token.isEmpty else { throw GitHubError.missingToken }
         try await putNewFile(path: "\(config.folder)/\(Self.attachmentsSubfolder)/\(filename)",
                              content: data,
-                             message: "mobile capture: \(filename)")
+                             message: "mobile capture: \(filename)",
+                             pathIsUnique: true)   // a retry after a lost response must not wedge the queue
         return filename
     }
 
