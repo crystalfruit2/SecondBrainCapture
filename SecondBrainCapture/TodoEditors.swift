@@ -55,11 +55,20 @@ enum TodoFileEditor {
     /// creating the heading at the end of the file when it's missing. The
     /// insertion point is right after the section's last non-blank line, so
     /// the blank line that separates sections in the note stays where it is.
-    static func insert(_ line: String, under heading: String, in content: String) -> String {
+    ///
+    /// `anchor`: when the heading is missing and the note has this heading,
+    /// the new section is created just above it instead of at the end of the
+    /// file (Pocket's `## Important` belongs before `## Cards`).
+    static func insert(_ line: String, under heading: String, in content: String,
+                       before anchor: String? = nil) -> String {
         var lines = content.isEmpty ? [] : content.components(separatedBy: "\n")
         let wanted = normalizeHeading(heading)
 
         guard let headingIndex = lines.firstIndex(where: { normalizeHeading($0) == wanted }) else {
+            if let anchor, let at = lines.firstIndex(where: { normalizeHeading($0) == normalizeHeading(anchor) }) {
+                lines.insert(contentsOf: [heading, line, ""], at: at)
+                return lines.joined(separator: "\n")
+            }
             if let last = lines.last, !last.trimmingCharacters(in: .whitespaces).isEmpty { lines.append("") }
             lines.append(contentsOf: [heading, line])
             return lines.joined(separator: "\n")
@@ -85,6 +94,74 @@ enum TodoFileEditor {
 
     private static func normalizeHeading(_ s: String) -> String {
         s.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+}
+
+/// Pure string surgery for the `## Important` bullets of `Areas/Pocket.md` —
+/// plain `- label — detail` lines, **not** checkboxes, so none of the
+/// checkbox helpers (`setDone`, `setDue`) apply. No UIKit/SwiftUI, so it runs
+/// in `Checks/pocket_checks.swift` without Xcode.
+enum FactEditor {
+    static let heading = "## Important"
+    /// A new `## Important` section goes above the cards, not after the calendar block.
+    static let cardsAnchor = "## Cards"
+    static let separator = PocketFact.separator
+
+    /// Written when the vault has no Pocket note yet (404): just enough for
+    /// Rocky and `build_dashboard.py` to carry on from. Deliberately not the
+    /// To-Do template.
+    static let template = """
+    ---
+    tags:
+      - area
+      - personal
+    status: active
+    ---
+
+    # Pocket
+
+    ## Important
+
+    ## Cards
+    """
+
+    // Text rules live on `PocketFact` so DashboardModels.swift stands alone.
+    static func clean(_ s: String) -> String { PocketFact.clean(s) }
+    static func cleanLabel(_ s: String) -> String { PocketFact.cleanLabel(s) }
+
+    /// `"Door code — 4417"` → ("Door code", "4417"); no separator → detail "".
+    static func split(_ text: String) -> (label: String, detail: String) { PocketFact.split(text) }
+
+    /// The vault line for a brand-new fact.
+    static func newLine(label: String, detail: String) -> String { PocketFact.newLine(label: label, detail: detail) }
+
+    /// Label and detail of a bullet line; nil when the line isn't a bullet.
+    static func parse(_ line: String) -> (label: String, detail: String)? {
+        guard let r = line.range(of: #"^\s*[-*+]\s+(?=\S)"#, options: .regularExpression) else { return nil }
+        return split(String(line[r.upperBound...]))
+    }
+
+    /// `line` with its text replaced, keeping its indentation and bullet marker.
+    /// A line that isn't a bullet at all is replaced by a fresh `- ` line.
+    static func replaced(line: String, label: String, detail: String) -> String {
+        let fresh = newLine(label: label, detail: detail)
+        guard let r = line.range(of: #"^\s*[-*+]\s+(?=\S)"#, options: .regularExpression) else { return fresh }
+        return String(line[..<r.upperBound]) + String(fresh.dropFirst(2))
+    }
+
+    /// Insert a new bullet under `## Important` (created above `## Cards` when absent).
+    static func insert(_ line: String, in content: String) -> String {
+        TodoFileEditor.insert(line, under: heading, in: content, before: cardsAnchor)
+    }
+
+    /// `content` without the bullet matching `expected` (located like every
+    /// other single-line edit: exact text beats the stale line-number hint).
+    /// Nil when the line is gone.
+    static func removing(_ expected: String, hint: Int, from content: String) -> String? {
+        var lines = content.components(separatedBy: "\n")
+        guard let index = TaskLineEditor.locate(expected, in: lines, hint: hint) else { return nil }
+        lines.remove(at: index)
+        return lines.joined(separator: "\n")
     }
 }
 

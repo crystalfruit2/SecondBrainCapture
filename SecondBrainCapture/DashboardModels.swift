@@ -679,6 +679,9 @@ struct Dashboard: Codable, Equatable {
     /// next few days, from `Areas/Pocket.md`.
     var pocket: [PocketItem]
     let pocketFile: String?
+    /// Schema v6 `pocket.facts` (2026-10-15): the undated must-remember bullets
+    /// under `## Important`. Older payloads lack the key → [].
+    var pocketFacts: [PocketFact]
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -703,6 +706,7 @@ struct Dashboard: Codable, Equatable {
         let pocketPayload = (try? c.decodeIfPresent(PocketPayload.self, forKey: .pocket)) ?? nil
         pocket = pocketPayload?.items ?? []
         pocketFile = pocketPayload?.file
+        pocketFacts = pocketPayload?.facts ?? []
     }
 
     init(version: Int = 1, generated: String? = nil, rocky: RockyNudge? = nil,
@@ -710,13 +714,13 @@ struct Dashboard: Codable, Equatable {
          market: [MarketItem] = [], todo: [TodoItem] = [], todoFile: String? = nil,
          companion: CompanionData = CompanionData(),
          health: HealthToday = HealthToday(), finance: FinancePayload? = nil,
-         pocket: [PocketItem] = [], pocketFile: String? = nil) {
+         pocket: [PocketItem] = [], pocketFile: String? = nil, pocketFacts: [PocketFact] = []) {
         self.version = version; self.generated = generated; self.rocky = rocky
         self.tasks = tasks; self.agenda = agenda; self.projects = projects
         self.market = market; self.todo = todo; self.todoFile = todoFile
         self.companion = companion; self.health = health
         self.finance = finance
-        self.pocket = pocket; self.pocketFile = pocketFile
+        self.pocket = pocket; self.pocketFile = pocketFile; self.pocketFacts = pocketFacts
     }
 
     /// Re-wrap for the encoder so the cache round-trips through the same
@@ -734,7 +738,7 @@ struct Dashboard: Codable, Equatable {
         try c.encode(companion, forKey: .companion)
         try c.encode(health, forKey: .health)
         try c.encodeIfPresent(finance, forKey: .finance)
-        try c.encode(PocketPayload(file: pocketFile, items: pocket), forKey: .pocket)
+        try c.encode(PocketPayload(file: pocketFile, items: pocket, facts: pocketFacts), forKey: .pocket)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -757,12 +761,18 @@ struct Dashboard: Codable, Equatable {
     struct PocketPayload: Codable {
         let file: String?
         let items: [PocketItem]
-        init(file: String?, items: [PocketItem]) { self.file = file; self.items = items }
+        let facts: [PocketFact]
+        init(file: String?, items: [PocketItem], facts: [PocketFact] = []) {
+            self.file = file; self.items = items; self.facts = facts
+        }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             file = try c.decodeIfPresent(String.self, forKey: .file)
             // One bad item drops itself, not the list.
             items = (try? c.decodeIfPresent([Failable<PocketItem>].self, forKey: .items))?
+                .compactMap(\.value) ?? []
+            // Schema v6. Its own `try?`: a bad `facts` key must never drop the cards.
+            facts = (try? c.decodeIfPresent([Failable<PocketFact>].self, forKey: .facts))?
                 .compactMap(\.value) ?? []
         }
     }
@@ -866,6 +876,69 @@ struct PocketItem: Codable, Identifiable, Equatable, Hashable {
         guard let start, startDate != nil else { return "All day" }
         if let end, PocketClock.at(end, on: day) != nil { return "\(start)–\(end)" }
         return start
+    }
+}
+
+/// One bullet under `## Important` in `Areas/Pocket.md` — an undated
+/// must-remember thing ("Door code B-Bau — 4417"). Plain bullet, not a
+/// checkbox. `id` is a hash of `text`, so an edit changes it vault-side; the
+/// phone keeps the old id on its optimistic copy until CI re-issues the list.
+struct PocketFact: Codable, Identifiable, Equatable, Hashable {
+    let id: String
+    let text: String            // everything after the bullet
+    let label: String
+    let detail: String          // "" when the bullet has no " — detail"
+    let file: String
+    let line: Int               // 1-based real file line; a hint only
+    let raw: String             // the exact bullet line
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        let parts = Self.split(text)
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? parts.label
+        detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? parts.detail
+        file = try c.decodeIfPresent(String.self, forKey: .file) ?? ""
+        line = try c.decodeIfPresent(Int.self, forKey: .line) ?? 0
+        raw = try c.decodeIfPresent(String.self, forKey: .raw) ?? Self.newLine(label: label, detail: detail)
+    }
+
+    init(id: String, label: String, detail: String = "", file: String, line: Int = 0, raw: String? = nil) {
+        let l = Self.cleanLabel(label), d = Self.clean(detail)
+        self.id = id; self.label = l; self.detail = d
+        self.text = d.isEmpty ? l : "\(l)\(Self.separator)\(d)"
+        self.file = file; self.line = line
+        self.raw = raw ?? Self.newLine(label: l, detail: d)
+    }
+
+    // The text rules live here, not in `FactEditor` (TodoEditors.swift, which
+    // delegates), so this file stays compilable on its own — the expense
+    // checks build it without the editors.
+    static let separator = " — "
+
+    /// One line of text: newlines and tabs become spaces, runs of blanks collapse.
+    static func clean(_ s: String) -> String {
+        s.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// A label must not contain the separator, or the next parse would cut it in two.
+    static func cleanLabel(_ s: String) -> String {
+        clean(s).replacingOccurrences(of: separator, with: " – ")
+    }
+
+    /// `"Door code — 4417"` → ("Door code", "4417"); no separator → detail "".
+    static func split(_ text: String) -> (label: String, detail: String) {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        guard let r = t.range(of: separator) else { return (t, "") }
+        return (String(t[..<r.lowerBound]).trimmingCharacters(in: .whitespaces),
+                String(t[r.upperBound...]).trimmingCharacters(in: .whitespaces))
+    }
+
+    /// The vault line for a fact: `- label — detail`, detail optional.
+    static func newLine(label: String, detail: String) -> String {
+        let l = cleanLabel(label), d = clean(detail)
+        return d.isEmpty ? "- \(l)" : "- \(l)\(separator)\(d)"
     }
 }
 

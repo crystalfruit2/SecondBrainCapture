@@ -145,6 +145,50 @@ struct PendingHealthAction: Codable, Identifiable, Equatable {
     var commitMessage: String { "mobile: health log — \(text.prefix(60))" }
 }
 
+/// A Pocket "Important" edit that hasn't reached GitHub yet. Three write
+/// kinds: add (insert under `## Important`), edit (replace one bullet's text)
+/// and delete (drop the bullet's line). Facts are plain bullets, never
+/// checkboxes, so there is no done/postpone here.
+struct PendingFactAction: Codable, Identifiable, Equatable {
+    enum Kind: String, Codable, Equatable { case add, edit, delete }
+
+    let id: UUID
+    /// `PocketFact.id` — a hash of the text once CI has indexed the line, or
+    /// this action's own UUID string for a fact the phone just added.
+    let factID: String
+    let file: String
+    let line: Int
+    /// `.add`: the line to write. `.edit`/`.delete`: the line the vault holds
+    /// *now* (what `locate` looks for), kept from the oldest collapsed action.
+    let raw: String
+    /// The new label/detail (`.add`, `.edit`); the shown ones for `.delete`.
+    let label: String
+    let detail: String
+    let kind: Kind
+    let createdAt: Date
+
+    init(factID: String, file: String, line: Int, raw: String, label: String, detail: String, kind: Kind) {
+        self.id = UUID()
+        self.factID = factID
+        self.file = file
+        self.line = line
+        self.raw = raw
+        self.label = label
+        self.detail = detail
+        self.kind = kind
+        self.createdAt = Date()
+    }
+
+    var commitMessage: String {
+        let short = label.prefix(60)
+        switch kind {
+        case .add: return "mobile: add important — \(short)"
+        case .edit: return "mobile: edit important — \(short)"
+        case .delete: return "mobile: remove important — \(short)"
+        }
+    }
+}
+
 /// Owns the read side of the vault: fetches the prebuilt `dashboard.json`,
 /// caches it so the app opens instantly (and works on the underground), and
 /// queues task edits back to GitHub.
@@ -158,6 +202,7 @@ final class DashboardStore: ObservableObject {
     @Published private(set) var marketPending: [PendingMarketAction] = []
     @Published private(set) var healthPending: [PendingHealthAction] = []
     @Published private(set) var todoPending: [PendingTodoAction] = []
+    @Published private(set) var factPending: [PendingFactAction] = []
 
     /// Supplies a configured service, or nil when there's no token yet.
     var serviceProvider: () -> GitHubService? = { nil }
@@ -167,6 +212,8 @@ final class DashboardStore: ObservableObject {
     var marketListPath: () -> String = { "Areas/Market-List.md" }
     /// Repo-relative path of the To-Do list note.
     var todoListPath: () -> String = { "Areas/To-Do.md" }
+    /// Fallback path of the Pocket note when the dashboard doesn't name it.
+    var pocketNotePath: () -> String = { "Areas/Pocket.md" }
     /// Repo-relative path of *today's* daily note — the Health log's home.
     var todayNotePath: () -> String = { "Daily/\(DateFormatter.vaultDay.string(from: Date())).md" }
 
@@ -176,10 +223,20 @@ final class DashboardStore: ObservableObject {
     private let marketQueueURL: URL
     private let healthQueueURL: URL
     private let todoQueueURL: URL
+    private let factQueueURL: URL
     private var isFlushing = false
     private var isFlushingMarket = false
     private var isFlushingHealth = false
     private var isFlushingTodo = false
+    private var isFlushingFacts = false
+    /// The fact action whose network call is in flight — never collapsed into,
+    /// since the vault is about to change under it.
+    private var factInFlight: UUID?
+    /// Fact actions that committed within the last few minutes. `dashboard.json`
+    /// only catches up when CI rebuilds it, so a refresh in that window would
+    /// otherwise bring the old list back.
+    private var factRecent: [(action: PendingFactAction, at: Date)] = []
+    private let factRecentTTL: TimeInterval = 5 * 60
     /// How long a cached dashboard stays good enough to skip a network round-trip.
     private let staleAfter: TimeInterval = 5 * 60
 
@@ -187,6 +244,7 @@ final class DashboardStore: ObservableObject {
     var marketPendingCount: Int { marketPending.count }
     var healthPendingCount: Int { healthPending.count }
     var todoPendingCount: Int { todoPending.count }
+    var factPendingCount: Int { factPending.count }
     var hasLoaded: Bool { dashboard != nil }
 
     init() {
@@ -198,11 +256,13 @@ final class DashboardStore: ObservableObject {
         marketQueueURL = dir.appendingPathComponent("market-actions.json")
         healthQueueURL = dir.appendingPathComponent("health-actions.json")
         todoQueueURL = dir.appendingPathComponent("todo-actions.json")
+        factQueueURL = dir.appendingPathComponent("fact-actions.json")
         loadCache()
         loadQueue()
         loadMarketQueue()
         loadHealthQueue()
         loadTodoQueue()
+        loadFactQueue()
 
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
@@ -211,6 +271,7 @@ final class DashboardStore: ObservableObject {
                 await self?.flushMarket()
                 await self?.flushHealth()
                 await self?.flushTodo()
+                await self?.flushFacts()
             }
         }
         monitor.start(queue: DispatchQueue(label: "com.alp.SecondBrainCapture.dashboard"))
@@ -232,6 +293,7 @@ final class DashboardStore: ObservableObject {
             fresh.market = applyPendingMarket(to: fresh.market)
             fresh.health = applyPendingHealth(to: fresh.health)
             fresh.todo = applyPendingTodo(to: fresh.todo)
+            fresh.pocketFacts = applyPendingFacts(to: fresh.pocketFacts)
             dashboard = fresh
             lastLoaded = Date()
             lastError = nil
@@ -249,6 +311,7 @@ final class DashboardStore: ObservableObject {
             await flushMarket()
             await flushHealth()
             await flushTodo()
+            await flushFacts()
             return
         }
         await refresh()
@@ -256,6 +319,7 @@ final class DashboardStore: ObservableObject {
         await flushMarket()
         await flushHealth()
         await flushTodo()
+        await flushFacts()
     }
 
     // MARK: - Writing
@@ -545,6 +609,106 @@ final class DashboardStore: ObservableObject {
         return true
     }
 
+    // MARK: - Writing (Pocket "Important")
+
+    private var factsPath: String {
+        if let file = dashboard?.pocketFile, !file.isEmpty { return file }
+        return pocketNotePath()
+    }
+
+    /// Add a fact from one line of text — `label — detail`, detail optional.
+    func addFact(_ text: String) {
+        let parts = FactEditor.split(FactEditor.clean(text))
+        addFact(label: parts.label, detail: parts.detail)
+    }
+
+    /// Add a fact, optimistically and offline-first. It shows up under a temp id
+    /// until CI re-indexes the vault and hands it a real one.
+    func addFact(label: String, detail: String = "") {
+        let l = FactEditor.cleanLabel(label), d = FactEditor.clean(detail)
+        guard !l.isEmpty else { return }
+        let path = factsPath
+        let tempID = UUID().uuidString
+        let raw = FactEditor.newLine(label: l, detail: d)
+
+        mutateFacts { $0.append(PocketFact(id: tempID, label: l, detail: d, file: path, line: 0, raw: raw)) }
+        enqueueFact(PendingFactAction(factID: tempID, file: path, line: 0, raw: raw,
+                                      label: l, detail: d, kind: .add))
+    }
+
+    /// Replace a fact's text. The optimistic copy keeps the old `id` (a hash of
+    /// the old text) so further edits still find it until CI re-issues the list.
+    func editFact(_ fact: PocketFact, label: String, detail: String) {
+        let l = FactEditor.cleanLabel(label), d = FactEditor.clean(detail)
+        guard !l.isEmpty, l != fact.label || d != fact.detail else { return }
+        let path = fact.file.isEmpty ? factsPath : fact.file
+        let newRaw = FactEditor.replaced(line: fact.raw, label: l, detail: d)
+
+        mutateFacts { facts in
+            guard let i = facts.firstIndex(where: { $0.id == fact.id }) else { return }
+            facts[i] = PocketFact(id: fact.id, label: l, detail: d, file: facts[i].file,
+                                  line: facts[i].line, raw: newRaw)
+        }
+        enqueueFact(PendingFactAction(factID: fact.id, file: path, line: fact.line, raw: fact.raw,
+                                      label: l, detail: d, kind: .edit))
+    }
+
+    func deleteFact(_ fact: PocketFact) {
+        let path = fact.file.isEmpty ? factsPath : fact.file
+        mutateFacts { $0.removeAll { $0.id == fact.id } }
+        enqueueFact(PendingFactAction(factID: fact.id, file: path, line: fact.line, raw: fact.raw,
+                                      label: fact.label, detail: fact.detail, kind: .delete))
+    }
+
+    /// Same ordered drain as the other queues. A 422 means the line is gone
+    /// (or the note was rewritten) — retrying would wedge the queue, so the
+    /// action is dropped and the reason shown.
+    @discardableResult
+    func flushFacts() async -> Bool {
+        guard !isFlushingFacts, !factPending.isEmpty, let service = serviceProvider() else {
+            return factPending.isEmpty
+        }
+        isFlushingFacts = true
+        defer { isFlushingFacts = false; factInFlight = nil }
+
+        while let action = factPending.first {
+            factInFlight = action.id
+            do {
+                switch action.kind {
+                case .add:
+                    try await service.insertLine(path: action.file, underHeading: FactEditor.heading,
+                                                 line: action.raw, message: action.commitMessage,
+                                                 before: FactEditor.cardsAnchor,
+                                                 template: FactEditor.template)
+                case .edit:
+                    try await service.editLine(path: action.file, lineNumber: action.line,
+                                               expectedLine: action.raw,
+                                               message: action.commitMessage) { line in
+                        FactEditor.replaced(line: line, label: action.label, detail: action.detail)
+                    }
+                case .delete:
+                    try await service.removeLine(path: action.file, lineNumber: action.line,
+                                                 expectedLine: action.raw, message: action.commitMessage)
+                }
+                factInFlight = nil
+                factPending.removeAll { $0.id == action.id }
+                factRecent.append((action, Date()))
+                saveFactQueue()
+                lastError = nil
+            } catch GitHubError.badResponse(let code, let msg) where code == 422 {
+                factInFlight = nil
+                factPending.removeAll { $0.id == action.id }
+                saveFactQueue()
+                lastError = msg
+            } catch {
+                factInFlight = nil
+                lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                return false
+            }
+        }
+        return true
+    }
+
     // MARK: - Internals
 
     private func enqueue(_ action: PendingTaskAction) {
@@ -713,6 +877,97 @@ final class DashboardStore: ObservableObject {
         return result
     }
 
+    private func mutateFacts(_ change: (inout [PocketFact]) -> Void) {
+        guard var board = dashboard else { return }
+        change(&board.pocketFacts)
+        dashboard = board
+        saveCache(board)
+    }
+
+    /// Queue a fact edit, collapsing what hasn't left the phone yet:
+    /// - edit of an unsynced add → the add is rewritten, one commit with the final text;
+    /// - delete of an unsynced add → both vanish, the vault never hears of it;
+    /// - repeated edits → newest wins but inherits the *older* action's `raw`/`line`
+    ///   (the line the vault still holds);
+    /// - delete after unsynced edits → one delete of the line the vault holds.
+    /// An action whose network call is in flight is never touched.
+    private func enqueueFact(_ action: PendingFactAction) {
+        func mine(_ kind: PendingFactAction.Kind) -> Int? {
+            factPending.firstIndex { $0.factID == action.factID && $0.kind == kind && $0.id != factInFlight }
+        }
+        switch action.kind {
+        case .add:
+            factPending.append(action)
+        case .edit:
+            if let i = mine(.add) {
+                let old = factPending[i]
+                factPending[i] = PendingFactAction(factID: old.factID, file: old.file, line: 0,
+                                                   raw: FactEditor.newLine(label: action.label, detail: action.detail),
+                                                   label: action.label, detail: action.detail, kind: .add)
+            } else if let i = mine(.edit) {
+                let older = factPending.remove(at: i)
+                factPending.append(PendingFactAction(factID: action.factID, file: action.file, line: older.line,
+                                                     raw: older.raw, label: action.label, detail: action.detail,
+                                                     kind: .edit))
+            } else {
+                factPending.append(action)
+            }
+        case .delete:
+            if let i = mine(.add) {
+                factPending.remove(at: i)   // never committed, nothing to delete
+            } else if let i = mine(.edit) {
+                let older = factPending[i]
+                factPending.removeAll { $0.factID == action.factID && $0.kind == .edit && $0.id != factInFlight }
+                factPending.append(PendingFactAction(factID: action.factID, file: action.file, line: older.line,
+                                                     raw: older.raw, label: action.label, detail: action.detail,
+                                                     kind: .delete))
+            } else {
+                factPending.append(action)
+            }
+        }
+        saveFactQueue()
+        Task { await flushFacts() }
+    }
+
+    /// Replay unsynced fact edits — and those that committed minutes ago, which
+    /// CI hasn't reindexed yet — over a freshly fetched list, so it doesn't
+    /// flicker back. Every step is idempotent: once CI has caught up the
+    /// replayed add finds its text, the edit and delete find nothing to match.
+    private func applyPendingFacts(to facts: [PocketFact]) -> [PocketFact] {
+        factRecent.removeAll { Date().timeIntervalSince($0.at) > factRecentTTL }
+        let actions = factRecent.map { (action: $0.action, recent: true) }
+            + factPending.map { (action: $0, recent: false) }
+        guard !actions.isEmpty else { return facts }
+
+        var result = facts
+        for (action, recent) in actions {
+            let index = result.firstIndex {
+                $0.id == action.factID
+                    || (action.kind != .add && $0.raw.trimmingCharacters(in: .whitespaces)
+                        == action.raw.trimmingCharacters(in: .whitespaces))
+            }
+            switch action.kind {
+            case .add:
+                let text = FactEditor.newLine(label: action.label, detail: action.detail)
+                let landed = result.contains { $0.id == action.factID }
+                    || (recent && result.contains { $0.raw.trimmingCharacters(in: .whitespaces) == text })
+                if !landed {
+                    result.append(PocketFact(id: action.factID, label: action.label, detail: action.detail,
+                                             file: action.file, line: 0, raw: text))
+                }
+            case .edit:
+                guard let i = index else { continue }
+                let f = result[i]
+                result[i] = PocketFact(id: f.id, label: action.label, detail: action.detail, file: f.file,
+                                       line: f.line,
+                                       raw: FactEditor.replaced(line: f.raw, label: action.label, detail: action.detail))
+            case .delete:
+                if let i = index { result.remove(at: i) }
+            }
+        }
+        return result
+    }
+
     /// Replay unsynced logs over a freshly fetched "today" list — a still-
     /// pending entry has no counterpart there yet (CI hasn't reindexed), so
     /// it's added rather than skipped, same reasoning as market's `.add`.
@@ -782,5 +1037,16 @@ final class DashboardStore: ObservableObject {
     private func saveTodoQueue() {
         guard let data = try? JSONEncoder().encode(todoPending) else { return }
         try? data.write(to: todoQueueURL, options: .atomic)
+    }
+
+    private func loadFactQueue() {
+        guard let data = try? Data(contentsOf: factQueueURL),
+              let items = try? JSONDecoder().decode([PendingFactAction].self, from: data) else { return }
+        factPending = items
+    }
+
+    private func saveFactQueue() {
+        guard let data = try? JSONEncoder().encode(factPending) else { return }
+        try? data.write(to: factQueueURL, options: .atomic)
     }
 }

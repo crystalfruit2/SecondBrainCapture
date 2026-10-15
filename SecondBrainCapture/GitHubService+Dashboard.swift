@@ -160,23 +160,54 @@ extension GitHubService {
 
     /// Insert one new line under a `##` heading of a note (the To-Do list's
     /// "add item"). Same 409 retry as `appendLine`; a 404 means the vault has
-    /// no To-Do note yet, so one is created from the template with the item
-    /// already in place.
-    func insertLine(path: String, underHeading heading: String, line: String, message: String) async throws {
+    /// no such note yet, so one is created from `template` with the item
+    /// already in place — the default is the To-Do skeleton, so any other
+    /// note (Pocket) must pass its own.
+    func insertLine(path: String, underHeading heading: String, line: String, message: String,
+                    before anchor: String? = nil,
+                    template: String = TodoFileEditor.template) async throws {
         do {
-            try await performInsert(path: path, heading: heading, line: line, message: message)
+            try await performInsert(path: path, heading: heading, line: line, message: message, anchor: anchor)
         } catch GitHubError.badResponse(let code, _) where code == 409 {
-            try await performInsert(path: path, heading: heading, line: line, message: message)
+            try await performInsert(path: path, heading: heading, line: line, message: message, anchor: anchor)
         } catch GitHubError.badResponse(let code, _) where code == 404 {
-            let fresh = TodoFileEditor.insert(line, under: heading, in: TodoFileEditor.template)
+            let fresh = TodoFileEditor.insert(line, under: heading, in: template, before: anchor)
             try await putNewFile(path: path, content: Data((fresh + "\n").utf8), message: message)
         }
     }
 
-    private func performInsert(path: String, heading: String, line: String, message: String) async throws {
+    private func performInsert(path: String, heading: String, line: String, message: String,
+                               anchor: String?) async throws {
         let file = try await fetchFile(path: path)
-        let updated = TodoFileEditor.insert(line, under: heading, in: file.content)
+        let updated = TodoFileEditor.insert(line, under: heading, in: file.content, before: anchor)
         guard updated != file.content else { return }
+        try await putFile(path: path, content: updated, sha: file.sha, message: message)
+    }
+
+    // MARK: - Removing a line
+
+    /// Delete exactly one line of a note (a Pocket fact). Same locate rules and
+    /// the same retry-once on a 409 as `editLine`; a line that can't be found
+    /// any more is a 422 the caller drops the action on.
+    func removeLine(path: String,
+                    lineNumber: Int,
+                    expectedLine: String,
+                    message: String) async throws {
+        do {
+            try await performRemove(path: path, lineNumber: lineNumber, expectedLine: expectedLine, message: message)
+        } catch GitHubError.badResponse(let code, _) where code == 409 {
+            try await performRemove(path: path, lineNumber: lineNumber, expectedLine: expectedLine, message: message)
+        }
+    }
+
+    private func performRemove(path: String,
+                               lineNumber: Int,
+                               expectedLine: String,
+                               message: String) async throws {
+        let file = try await fetchFile(path: path)
+        guard let updated = FactEditor.removing(expectedLine, hint: lineNumber, from: file.content) else {
+            throw GitHubError.badResponse(422, "That item is no longer in \(path) — pull to refresh.")
+        }
         try await putFile(path: path, content: updated, sha: file.sha, message: message)
     }
 

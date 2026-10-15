@@ -1,16 +1,20 @@
-// Checks for the Pocket tab: decoding (schema v5 and older dashboards), the
-// 05:00 vault-day clock, grouping, and reminder times. No Xcode project,
+// Checks for the Pocket tab: decoding (schema v5/v6 and older dashboards), the
+// 05:00 vault-day clock, grouping, reminder times, and the "Important" facts
+// (decode, cache round trip, and the pure line editors). No Xcode project,
 // simulator or network needed — run from the repo root:
 //
 //   S=SecondBrainCapture
 //   swiftc -parse-as-library $S/DashboardModels.swift $S/TodoNotifier.swift \
+//          $S/TodoEditors.swift $S/GitHubService.swift $S/GitHubService+Dashboard.swift \
 //          Checks/pocket_checks.swift -o /tmp/pocket_checks
 //   /tmp/pocket_checks [path/to/older-dashboard.json]
 //
 // Contract with the vault: `Checks/fixtures/pocket-payload.json` is real output
-// of `second_brain/.claude/scripts/build_dashboard.py`'s `parse_pocket` (three
-// cards merged with a three-event calendar block, today = 2026-10-14). After
-// changing the payload shape, regenerate it there and decode it here.
+// of `second_brain/.claude/scripts/build_dashboard.py`'s `parse_pocket`: the
+// five cards (three cards merged with a three-event calendar block, today =
+// 2026-10-14) plus `facts` from `parse_pocket_facts` run on a temp vault whose
+// `## Important` had five bullets (version 6). After changing the payload
+// shape, regenerate it there and decode it here.
 
 import Foundation
 
@@ -31,6 +35,113 @@ enum PocketChecks {
 
     static func decode(_ json: String) throws -> Dashboard {
         try JSONDecoder().decode(Dashboard.self, from: Data(json.utf8))
+    }
+
+    // MARK: - Important facts (schema v6)
+
+    static func importantFacts(_ here: URL) {
+        // Decode the vault's real output.
+        do {
+            let data = try Data(contentsOf: here.appendingPathComponent("fixtures/pocket-payload.json"))
+            let board = try JSONDecoder().decode(Dashboard.self, from: data)
+            check("facts: version 6, 5 facts, cards untouched", board.version == 6
+                  && board.pocketFacts.count == 5 && board.pocket.count == 5,
+                  "\(board.pocketFacts.count) facts, \(board.pocket.count) items")
+            let door = board.pocketFacts.first
+            check("facts: first fact fields", door?.id == "1d7c7096" && door?.label == "Door code B-Bau"
+                  && door?.detail == "4417" && door?.line == 17 && door?.raw == "- Door code B-Bau — 4417"
+                  && door?.file == "Areas/Pocket.md", "\(String(describing: door))")
+            let star = board.pocketFacts.first { $0.label == "Ayşe's room" }
+            check("facts: * bullet and non-ASCII kept verbatim", star?.raw == "* Ayşe's room — Haus 3, Raum 214"
+                  && star?.detail == "Haus 3, Raum 214", "\(String(describing: star))")
+            let bare = board.pocketFacts.first { $0.label == "Studierendenwerk hotline" }
+            check("facts: no detail → empty", bare?.detail == "" && bare?.text == "Studierendenwerk hotline")
+            let wifi = board.pocketFacts.first { $0.label == "Wi-Fi (eduroam)" }
+            check("facts: split on the FIRST em dash", wifi?.detail == "alp@uni-kassel.de — pass in Keychain",
+                  "\(String(describing: wifi))")
+
+            let again = try JSONDecoder().decode(Dashboard.self, from: JSONEncoder().encode(board))
+            check("round trip keeps facts (and cards)", again.pocketFacts == board.pocketFacts
+                  && again.pocket == board.pocket && again.pocketFile == board.pocketFile)
+            // The cache shape is the CI shape: pocket.facts.
+            let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(board)) as? [String: Any]
+            let pocket = json?["pocket"] as? [String: Any]
+            check("encoded under pocket.facts", (pocket?["facts"] as? [Any])?.count == 5)
+        } catch {
+            check("facts fixture decodes", false, "\(error)")
+        }
+
+        // Tolerant decoding.
+        do {
+            let v5 = try decode(#"{"version":5,"pocket":{"file":"Areas/Pocket.md","items":[{"id":"a","date":"2026-10-15","title":"Good"}]}}"#)
+            check("v5 payload without facts → []", v5.pocketFacts.isEmpty && v5.pocket.count == 1)
+            let wrong = try decode(#"{"version":6,"pocket":{"file":"Areas/Pocket.md","items":[{"id":"a","date":"2026-10-15","title":"Good"}],"facts":"oops"}}"#)
+            check("wrong-type facts doesn't drop items", wrong.pocketFacts.isEmpty && wrong.pocket.map(\.title) == ["Good"])
+            let obj = try decode(#"{"version":6,"pocket":{"items":[{"id":"a","date":"2026-10-15","title":"Good"}],"facts":{"a":1}}}"#)
+            check("object-typed facts doesn't drop items", obj.pocketFacts.isEmpty && obj.pocket.count == 1)
+            let bad = try decode(#"{"version":6,"pocket":{"file":"Areas/Pocket.md","items":[],"facts":[{"id":"f1","text":"Door — 1","label":"Door","detail":"1","file":"Areas/Pocket.md","line":3,"raw":"- Door — 1"},{"label":"no id or text"},42]}}"#)
+            check("one bad fact dropped, rest kept", bad.pocketFacts.map(\.id) == ["f1"], "\(bad.pocketFacts)")
+            let thin = try decode(#"{"version":6,"pocket":{"items":[],"facts":[{"id":"f2","text":"PIN — 0815"}]}}"#)
+            check("fact with only id+text derives label/detail/raw",
+                  thin.pocketFacts.first?.label == "PIN" && thin.pocketFacts.first?.detail == "0815"
+                  && thin.pocketFacts.first?.raw == "- PIN — 0815" && thin.pocketFacts.first?.line == 0,
+                  "\(thin.pocketFacts)")
+        } catch {
+            check("tolerant facts decoding", false, "\(error)")
+        }
+
+        // FactEditor: new lines.
+        check("newLine: label + detail", FactEditor.newLine(label: "Door code", detail: "4417") == "- Door code — 4417")
+        check("newLine: no detail", FactEditor.newLine(label: "  Hotline ", detail: "  ") == "- Hotline")
+        check("newLine: one line only", FactEditor.newLine(label: "A\nB", detail: "x\n\ty") == "- A B — x y")
+        check("newLine: em dash in label can't be re-split",
+              FactEditor.parse(FactEditor.newLine(label: "A — B", detail: "c"))?.label == "A – B")
+        let typed = FactEditor.split("Door code — 4417")
+        check("split: typed text", typed.label == "Door code" && typed.detail == "4417")
+
+        // FactEditor: parse / replaced.
+        check("parse: bullet", FactEditor.parse("- Door code — 4417")?.detail == "4417")
+        check("parse: indented star bullet", FactEditor.parse("  * Door code")?.label == "Door code")
+        check("parse: not a bullet → nil", FactEditor.parse("## Cards") == nil && FactEditor.parse("plain") == nil)
+        check("replaced: keeps '- '", FactEditor.replaced(line: "- Door code — 4417", label: "Door code", detail: "5521")
+              == "- Door code — 5521")
+        check("replaced: keeps indent and marker",
+              FactEditor.replaced(line: "  * Old — x", label: "New", detail: "") == "  * New")
+        check("replaced: non-bullet gets a fresh bullet",
+              FactEditor.replaced(line: "garbage", label: "New", detail: "y") == "- New — y")
+
+        // Locating a moved line, then editing / removing it.
+        let note = ["# Pocket", "", "## Important", "", "- Inserted above", "- Door code B-Bau — 4417", "- Mensa PIN — 0815", "", "## Cards"]
+        let staleHint = 4   // where the line used to be (1-based)
+        let at = TaskLineEditor.locate("- Door code B-Bau — 4417", in: note, hint: staleHint)
+        check("locate: moved line found by text", at == 5, "\(String(describing: at))")
+        check("locate: plain bullet never matched as a checkbox",
+              TaskLineEditor.locate("- [ ] Door code B-Bau — 4417", in: note, hint: 1) == nil)
+        check("locate: edited-elsewhere line → nil", TaskLineEditor.locate("- Door code — 0000", in: note, hint: 6) == nil)
+        let content = note.joined(separator: "\n") + "\n"
+        let gone = FactEditor.removing("- Door code B-Bau — 4417", hint: staleHint, from: content)
+        check("removing: only that line goes", gone == note.enumerated().filter { $0.offset != 5 }.map(\.element).joined(separator: "\n") + "\n",
+              "\(String(describing: gone))")
+        check("removing: line gone → nil", FactEditor.removing("- Nope", hint: 1, from: content) == nil)
+        let crlf = "## Important\r\n- A — 1\r\n- B — 2\r\n"
+        check("removing: CRLF file", FactEditor.removing("- A — 1", hint: 2, from: crlf) == "## Important\r\n- B — 2\r\n")
+
+        // Inserting under `## Important`, never a To-Do-shaped file.
+        let added = FactEditor.insert("- New — 1", in: content)
+        check("insert: joins the Important list, before the blank line",
+              added.components(separatedBy: "\n") == ["# Pocket", "", "## Important", "", "- Inserted above",
+                                                      "- Door code B-Bau — 4417", "- Mensa PIN — 0815", "- New — 1", "", "## Cards", ""],
+              added)
+        let noSection = "# Pocket\n\n## Cards\n\n### 2026-10-15 · X\n\n## Calendar\n"
+        let created = FactEditor.insert("- New — 1", in: noSection)
+        check("insert: missing heading is created above ## Cards",
+              created == "# Pocket\n\n## Important\n- New — 1\n\n## Cards\n\n### 2026-10-15 · X\n\n## Calendar\n", created)
+        let skeleton = FactEditor.insert("- New — 1", in: FactEditor.template)
+        check("skeleton: Pocket-shaped, nothing To-Do about it",
+              skeleton.contains("# Pocket") && skeleton.contains("## Important\n- New — 1")
+              && !skeleton.contains("Routines") && !skeleton.contains("# To Do") && !skeleton.contains("## To do"), skeleton)
+        // What the vault parser would make of the inserted line (the contract's other half).
+        check("insert → parse round trip", FactEditor.parse("- New — 1")?.label == "New")
     }
 
     static func main() {
@@ -113,6 +224,8 @@ enum PocketChecks {
         check("reminder ids", fires.map(\.item.id) == ["t", "v"], "\(fires.map(\.item.id))")
         check("reminder at start − 30", fires.first?.fire == at(2026, 10, 15, 13, 45))
         check("all-day gets no reminder", !fires.contains { $0.item.id == "a" })
+
+        importantFacts(here)
 
         print("\n\(passed) passed, \(failures) failed")
         exit(failures == 0 ? 0 : 1)

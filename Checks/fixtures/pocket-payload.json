@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "pocket": {
     "file": "Areas/Pocket.md",
     "items": [
@@ -69,6 +69,53 @@
         "notes": [],
         "source": null,
         "origin": "calendar"
+      }
+    ],
+    "facts": [
+      {
+        "id": "1d7c7096",
+        "text": "Door code B-Bau — 4417",
+        "label": "Door code B-Bau",
+        "detail": "4417",
+        "file": "Areas/Pocket.md",
+        "line": 17,
+        "raw": "- Door code B-Bau — 4417"
+      },
+      {
+        "id": "f317025e",
+        "text": "Mensa card PIN — 0815",
+        "label": "Mensa card PIN",
+        "detail": "0815",
+        "file": "Areas/Pocket.md",
+        "line": 18,
+        "raw": "- Mensa card PIN — 0815"
+      },
+      {
+        "id": "84e5643b",
+        "text": "Ayşe's room — Haus 3, Raum 214",
+        "label": "Ayşe's room",
+        "detail": "Haus 3, Raum 214",
+        "file": "Areas/Pocket.md",
+        "line": 19,
+        "raw": "* Ayşe's room — Haus 3, Raum 214"
+      },
+      {
+        "id": "0747e5e1",
+        "text": "Studierendenwerk hotline",
+        "label": "Studierendenwerk hotline",
+        "detail": "",
+        "file": "Areas/Pocket.md",
+        "line": 20,
+        "raw": "- Studierendenwerk hotline"
+      },
+      {
+        "id": "b9504df7",
+        "text": "Wi-Fi (eduroam) — alp@uni-kassel.de — pass in Keychain",
+        "label": "Wi-Fi (eduroam)",
+        "detail": "alp@uni-kassel.de — pass in Keychain",
+        "file": "Areas/Pocket.md",
+        "line": 21,
+        "raw": "- Wi-Fi (eduroam) — alp@uni-kassel.de — pass in Keychain"
       }
     ]
   }
