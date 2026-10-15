@@ -675,6 +675,10 @@ struct Dashboard: Codable, Equatable {
     var health: HealthToday
     /// Schema v3 `finance` key (2026-09-12); older dashboards lack it → nil.
     let finance: FinancePayload?
+    /// Schema v5 `pocket` key (2026-10-14): time / place / your part for the
+    /// next few days, from `Areas/Pocket.md`.
+    var pocket: [PocketItem]
+    let pocketFile: String?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -694,18 +698,25 @@ struct Dashboard: Codable, Equatable {
         companion = try c.decodeIfPresent(CompanionData.self, forKey: .companion) ?? CompanionData()
         health = try c.decodeIfPresent(HealthToday.self, forKey: .health) ?? HealthToday()
         finance = try c.decodeIfPresent(FinancePayload.self, forKey: .finance)
+        // Schema v5: `"pocket": {"file": …, "items": […]}`. Decoded with `try?` —
+        // a malformed Pocket must never blank the whole dashboard.
+        let pocketPayload = (try? c.decodeIfPresent(PocketPayload.self, forKey: .pocket)) ?? nil
+        pocket = pocketPayload?.items ?? []
+        pocketFile = pocketPayload?.file
     }
 
     init(version: Int = 1, generated: String? = nil, rocky: RockyNudge? = nil,
          tasks: [DashboardTask] = [], agenda: [AgendaItem] = [], projects: [ProjectSummary] = [],
          market: [MarketItem] = [], todo: [TodoItem] = [], todoFile: String? = nil,
          companion: CompanionData = CompanionData(),
-         health: HealthToday = HealthToday(), finance: FinancePayload? = nil) {
+         health: HealthToday = HealthToday(), finance: FinancePayload? = nil,
+         pocket: [PocketItem] = [], pocketFile: String? = nil) {
         self.version = version; self.generated = generated; self.rocky = rocky
         self.tasks = tasks; self.agenda = agenda; self.projects = projects
         self.market = market; self.todo = todo; self.todoFile = todoFile
         self.companion = companion; self.health = health
         self.finance = finance
+        self.pocket = pocket; self.pocketFile = pocketFile
     }
 
     /// Re-wrap for the encoder so the cache round-trips through the same
@@ -723,10 +734,11 @@ struct Dashboard: Codable, Equatable {
         try c.encode(companion, forKey: .companion)
         try c.encode(health, forKey: .health)
         try c.encodeIfPresent(finance, forKey: .finance)
+        try c.encode(PocketPayload(file: pocketFile, items: pocket), forKey: .pocket)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, generated, rocky, tasks, agenda, projects, market, todo, companion, health, finance
+        case version, generated, rocky, tasks, agenda, projects, market, todo, companion, health, finance, pocket
     }
 
     /// The wire shape of the `todo` key.
@@ -738,6 +750,20 @@ struct Dashboard: Codable, Equatable {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             file = try c.decodeIfPresent(String.self, forKey: .file)
             items = try c.decodeIfPresent([TodoItem].self, forKey: .items) ?? []
+        }
+    }
+
+    /// The wire shape of the `pocket` key.
+    struct PocketPayload: Codable {
+        let file: String?
+        let items: [PocketItem]
+        init(file: String?, items: [PocketItem]) { self.file = file; self.items = items }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            file = try c.decodeIfPresent(String.self, forKey: .file)
+            // One bad item drops itself, not the list.
+            items = (try? c.decodeIfPresent([Failable<PocketItem>].self, forKey: .items))?
+                .compactMap(\.value) ?? []
         }
     }
 
@@ -756,6 +782,145 @@ struct Dashboard: Codable, Equatable {
     var upcomingTasks: [DashboardTask] { tasks(in: .upcoming) }
 
     var isEmpty: Bool { tasks.isEmpty && agenda.isEmpty && projects.isEmpty && rocky == nil }
+}
+
+// MARK: - Pocket (schema v5)
+
+/// Decodes to nil instead of throwing, so one malformed element can't sink an array.
+struct Failable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+}
+
+/// One thing to be at or do: the vital facts only. Built vault-side from
+/// `Areas/Pocket.md` — a Rocky-written card, a mirrored calendar event, or
+/// both merged. Read-only on the phone.
+struct PocketItem: Codable, Identifiable, Equatable, Hashable {
+    let id: String
+    let date: String            // YYYY-MM-DD
+    let start: String?          // HH:MM; nil = all day
+    let end: String?
+    let title: String
+    let place: String?
+    let part: String?           // 👉 what Alp has to do
+    let bring: String?          // 🎒
+    let notes: [String]         // 📝
+    let source: String?         // 🔗 vault note name
+    let origin: String          // card | calendar | both
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        date = try c.decode(String.self, forKey: .date)
+        start = try c.decodeIfPresent(String.self, forKey: .start)
+        end = try c.decodeIfPresent(String.self, forKey: .end)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        place = try c.decodeIfPresent(String.self, forKey: .place)
+        part = try c.decodeIfPresent(String.self, forKey: .part)
+        bring = try c.decodeIfPresent(String.self, forKey: .bring)
+        notes = (try? c.decodeIfPresent([String].self, forKey: .notes)) ?? []
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        origin = try c.decodeIfPresent(String.self, forKey: .origin) ?? "card"
+    }
+
+    init(id: String, date: String, start: String? = nil, end: String? = nil, title: String,
+         place: String? = nil, part: String? = nil, bring: String? = nil, notes: [String] = [],
+         source: String? = nil, origin: String = "card") {
+        self.id = id; self.date = date; self.start = start; self.end = end; self.title = title
+        self.place = place; self.part = part; self.bring = bring; self.notes = notes
+        self.source = source; self.origin = origin
+    }
+
+    var isAllDay: Bool { startDate == nil }
+
+    /// A thin card is a calendar event Rocky has nothing to add to.
+    var hasDetails: Bool { part != nil || bring != nil || !notes.isEmpty }
+
+    /// Midnight of `date`, device time zone.
+    var day: Date? { DateFormatter.vaultDay.date(from: date) }
+
+    var startDate: Date? { PocketClock.at(start, on: day) }
+
+    /// When the item stops mattering: its end time; start + 1 h when no end is
+    /// given; for an all-day item, 05:00 the next morning — the vault day.
+    var overAt: Date? {
+        guard let day else { return nil }
+        let cal = Calendar.current
+        guard let startDate else {
+            return cal.date(byAdding: .hour, value: 24 + PocketClock.dayStartHour, to: day)
+        }
+        if var endDate = PocketClock.at(end, on: day) {
+            if endDate <= startDate { endDate = cal.date(byAdding: .day, value: 1, to: endDate) ?? endDate }
+            return endDate
+        }
+        return cal.date(byAdding: .hour, value: 1, to: startDate)
+    }
+
+    func isOver(now: Date = Date()) -> Bool {
+        guard let overAt else { return true }      // undecodable date: never show
+        return overAt <= now
+    }
+
+    /// `14:15–15:45`, `14:15`, or `All day`.
+    var timeLabel: String {
+        guard let start, startDate != nil else { return "All day" }
+        if let end, PocketClock.at(end, on: day) != nil { return "\(start)–\(end)" }
+        return start
+    }
+}
+
+enum PocketClock {
+    /// Alp's day runs 05:00 → 05:00 (vault rule): at 01:00 on the 15th, an item
+    /// on the 15th is still "Tomorrow".
+    static let dayStartHour = 5
+
+    static func at(_ hhmm: String?, on day: Date?) -> Date? {
+        guard let hhmm, let day else { return nil }
+        let parts = hhmm.split(separator: ":")
+        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]),
+              (0...23).contains(h), (0...59).contains(m) else { return nil }
+        return Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: day)
+    }
+
+    /// Midnight of the vault day `now` falls in.
+    static func vaultDay(of now: Date) -> Date {
+        let cal = Calendar.current
+        let shifted = cal.date(byAdding: .hour, value: -dayStartHour, to: now) ?? now
+        return cal.startOfDay(for: shifted)
+    }
+
+    static func label(for day: Date, now: Date) -> String {
+        let cal = Calendar.current
+        let offset = cal.dateComponents([.day], from: vaultDay(of: now), to: cal.startOfDay(for: day)).day ?? 0
+        switch offset {
+        case 0: return "Today"
+        case 1: return "Tomorrow"
+        case -1: return "Yesterday"
+        default:
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_GB")
+            f.setLocalizedDateFormatFromTemplate("EEE d.M")
+            return f.string(from: day)
+        }
+    }
+
+    /// Items still ahead, grouped by day; all-day items first, then by start.
+    static func groups(_ items: [PocketItem], now: Date = Date()) -> [(label: String, items: [PocketItem])] {
+        let live = items.filter { !$0.isOver(now: now) && $0.day != nil }
+        let byDay = Dictionary(grouping: live) { $0.date }
+        return byDay.keys.sorted().compactMap { key in
+            guard let rows = byDay[key], let day = rows.first?.day else { return nil }
+            let sorted = rows.sorted { a, b in
+                switch (a.startDate, b.startDate) {
+                case (nil, nil): return a.title < b.title
+                case (nil, _): return true
+                case (_, nil): return false
+                case let (x?, y?): return x == y ? a.title < b.title : x < y
+                }
+            }
+            return (label(for: day, now: now), sorted)
+        }
+    }
 }
 
 extension DateFormatter {

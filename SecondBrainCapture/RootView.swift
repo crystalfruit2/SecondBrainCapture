@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Four tabs, and Capture is deliberately the first one.
+/// Five tabs, and Capture is deliberately the first one.
 ///
 /// The dashboard is additive: the screen Alp already uses doesn't change, it
 /// just becomes one tab of four, and it's still where the app opens. Zero-
@@ -12,6 +12,10 @@ import SwiftUI
 /// segment. Health, Projects and Finance share a single Features tab with an
 /// in-tab segmented switch, rather than each claiming its own icon — the bar
 /// was heading toward seven icons before this consolidation.
+///
+/// Pocket (2026-10-14) sits next to To Do: time, place and "your part" for the
+/// next few days — what Rocky told Alp, kept where he can glance at it. No
+/// badge: an ordinary day with a lecture in it isn't something to nag about.
 struct RootView: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var queue: CaptureQueue
@@ -30,20 +34,27 @@ struct RootView: View {
                 .badge(actionableCount)
                 .tag(1)
 
+            PocketView()
+                .tabItem { Label("Pocket", systemImage: "pin.fill") }
+                .tag(2)
+
             FeaturesView()
                 .tabItem { Label("Features", systemImage: "square.grid.2x2") }
                 .badge(store.dashboard?.finance?.unreadAlerts ?? 0)   // Faz S-G4a: unread Sentinel alerts
-                .tag(2)
+                .tag(3)
 
             CompanionView()
                 .tabItem { Label("Companion", systemImage: "sparkles") }
-                .tag(3)
+                .tag(4)
         }
-        .onChange(of: push.openFinanceTick) { _, _ in tab = 2 }
+        .onChange(of: push.openFinanceTick) { _, _ in tab = 3 }
         .onChange(of: push.openTodoTick) { _, _ in tab = 1 }
+        .onChange(of: push.openPocketTick) { _, _ in tab = 2 }
         .onAppear {
             #if DEBUG
-            if CommandLine.arguments.contains("-sbcTodoSegment") { tab = 1 }   // simulator screenshots
+            let args = CommandLine.arguments
+            if args.contains("-sbcTodoSegment") { tab = 1 }   // simulator screenshots
+            if args.contains("-sbcPocket") { tab = 2 }
             #endif
         }
     }

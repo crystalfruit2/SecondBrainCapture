@@ -1,0 +1,75 @@
+{
+  "version": 5,
+  "pocket": {
+    "file": "Areas/Pocket.md",
+    "items": [
+      {
+        "id": "55a5c4f0",
+        "date": "2026-10-15",
+        "start": "09:50",
+        "end": "10:20",
+        "title": "FB16 Studienservice",
+        "place": "Wilhelmshöher Allee 73, Raum 1324",
+        "part": null,
+        "bring": "Screenshot + signed LA",
+        "notes": [],
+        "source": null,
+        "origin": "both"
+      },
+      {
+        "id": "96807b8b",
+        "date": "2026-10-15",
+        "start": "14:15",
+        "end": "15:45",
+        "title": "RL – first lecture (Greenyer)",
+        "place": "Room -1607",
+        "part": "Be in the room at 14:15",
+        "bring": null,
+        "notes": [
+          "May move to the seminar room"
+        ],
+        "source": "Kassel-Learning-Agreement",
+        "origin": "card"
+      },
+      {
+        "id": "86f11145",
+        "date": "2026-10-16",
+        "start": null,
+        "end": null,
+        "title": "Deadline day",
+        "place": null,
+        "part": null,
+        "bring": null,
+        "notes": [],
+        "source": null,
+        "origin": "card"
+      },
+      {
+        "id": "c5191f4d",
+        "date": "2026-10-16",
+        "start": "18:15",
+        "end": "20:45",
+        "title": "Volleyball",
+        "place": "Aueparkhalle, Kassel",
+        "part": null,
+        "bring": null,
+        "notes": [],
+        "source": null,
+        "origin": "calendar"
+      },
+      {
+        "id": "398899c9",
+        "date": "2026-10-17",
+        "start": "17:00",
+        "end": "17:40",
+        "title": "Weekly meeting",
+        "place": "Online · zoom.us",
+        "part": null,
+        "bring": null,
+        "notes": [],
+        "source": null,
+        "origin": "calendar"
+      }
+    ]
+  }
+}

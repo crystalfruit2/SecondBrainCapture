@@ -57,6 +57,7 @@ struct SecondBrainCaptureApp: App {
                 // Local To-Do reminders follow the list: any edit, refresh or
                 // settings change rebuilds them from the cached dashboard.
                 .onChange(of: dashboard.dashboard?.todo) { _, _ in Task { await rescheduleReminders() } }
+                .onChange(of: dashboard.dashboard?.pocket) { _, _ in Task { await rescheduleReminders() } }
                 .onChange(of: config.remindersEnabled) { _, _ in Task { await rescheduleReminders() } }
                 .onChange(of: config.digestMinutes) { _, _ in Task { await rescheduleReminders() } }
                 .onChange(of: scenePhase) { _, phase in
@@ -75,6 +76,7 @@ struct SecondBrainCaptureApp: App {
 
     private func rescheduleReminders() async {
         await TodoNotifier.shared.reschedule(items: dashboard.dashboard?.todo ?? [],
+                                             pocket: dashboard.dashboard?.pocket ?? [],
                                              enabled: config.remindersEnabled,
                                              digestMinutes: config.digestMinutes)
     }

@@ -20,6 +20,8 @@ final class PushController: NSObject, ObservableObject {
     @Published var openFinanceTick = 0
     /// Bumped when a local To-Do reminder is tapped; RootView switches to To Do.
     @Published var openTodoTick = 0
+    /// Bumped when a Pocket reminder is tapped; RootView switches to Pocket.
+    @Published var openPocketTick = 0
     @Published private(set) var lastError: String?
 
     var serviceProvider: (() -> GitHubService?)?
@@ -99,6 +101,8 @@ extension PushController: UNUserNotificationCenterDelegate {
                 Task { await self.onFinancePush?() }
             case "todo":
                 self.openTodoTick += 1
+            case "pocket":
+                self.openPocketTick += 1
             default:
                 break
             }
