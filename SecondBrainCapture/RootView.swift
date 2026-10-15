@@ -50,7 +50,10 @@ struct RootView: View {
         .onChange(of: push.openFinanceTick) { _, _ in tab = 3 }
         .onChange(of: push.openTodoTick) { _, _ in tab = 1 }
         .onChange(of: push.openPocketTick) { _, _ in tab = 2 }
+        .scrollDismissesKeyboard(.interactively)   // drag a list to put the keyboard away
         .onAppear {
+            // Window is attached by now, but ask once the run loop has turned.
+            DispatchQueue.main.async { KeyboardDismiss.install() }
             #if DEBUG
             let args = CommandLine.arguments
             if args.contains("-sbcTodoSegment") { tab = 1 }   // simulator screenshots
