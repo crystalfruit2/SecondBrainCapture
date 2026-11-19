@@ -203,6 +203,9 @@ final class DashboardStore: ObservableObject {
     @Published private(set) var healthPending: [PendingHealthAction] = []
     @Published private(set) var todoPending: [PendingTodoAction] = []
     @Published private(set) var factPending: [PendingFactAction] = []
+    /// Compass time logs: unsynced ones, plus synced ones the dashboard hasn't
+    /// counted yet (and today's, so a "✓ Done" button stays hidden).
+    @Published private(set) var compassLog: [PendingCompassLog] = []
 
     /// Supplies a configured service, or nil when there's no token yet.
     var serviceProvider: () -> GitHubService? = { nil }
@@ -224,6 +227,8 @@ final class DashboardStore: ObservableObject {
     private let healthQueueURL: URL
     private let todoQueueURL: URL
     private let factQueueURL: URL
+    private let compassQueueURL: URL
+    private var isFlushingCompass = false
     private var isFlushing = false
     private var isFlushingMarket = false
     private var isFlushingHealth = false
@@ -245,6 +250,7 @@ final class DashboardStore: ObservableObject {
     var healthPendingCount: Int { healthPending.count }
     var todoPendingCount: Int { todoPending.count }
     var factPendingCount: Int { factPending.count }
+    var compassPendingCount: Int { compassLog.filter { $0.syncedAt == nil }.count }
     var hasLoaded: Bool { dashboard != nil }
 
     init() {
@@ -257,12 +263,14 @@ final class DashboardStore: ObservableObject {
         healthQueueURL = dir.appendingPathComponent("health-actions.json")
         todoQueueURL = dir.appendingPathComponent("todo-actions.json")
         factQueueURL = dir.appendingPathComponent("fact-actions.json")
+        compassQueueURL = dir.appendingPathComponent("compass-log.json")
         loadCache()
         loadQueue()
         loadMarketQueue()
         loadHealthQueue()
         loadTodoQueue()
         loadFactQueue()
+        loadCompassQueue()
 
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
@@ -272,6 +280,7 @@ final class DashboardStore: ObservableObject {
                 await self?.flushHealth()
                 await self?.flushTodo()
                 await self?.flushFacts()
+                await self?.flushCompass()
             }
         }
         monitor.start(queue: DispatchQueue(label: "com.alp.SecondBrainCapture.dashboard"))
@@ -294,6 +303,7 @@ final class DashboardStore: ObservableObject {
             fresh.health = applyPendingHealth(to: fresh.health)
             fresh.todo = applyPendingTodo(to: fresh.todo)
             fresh.pocketFacts = applyPendingFacts(to: fresh.pocketFacts)
+            fresh.compass = applyCompassLog(to: fresh.compass)
             dashboard = fresh
             lastLoaded = Date()
             lastError = nil
@@ -312,6 +322,7 @@ final class DashboardStore: ObservableObject {
             await flushHealth()
             await flushTodo()
             await flushFacts()
+            await flushCompass()
             return
         }
         await refresh()
@@ -320,6 +331,7 @@ final class DashboardStore: ObservableObject {
         await flushHealth()
         await flushTodo()
         await flushFacts()
+        await flushCompass()
     }
 
     // MARK: - Writing
@@ -709,6 +721,73 @@ final class DashboardStore: ObservableObject {
         return true
     }
 
+    // MARK: - Writing (Compass time log)
+
+    /// Log time to a Compass area: the bar moves at once (optimistic `doneMin`
+    /// bump), the line is persisted before any network call, and it lands as
+    /// `- YYYY-MM-DD · area · 60m · note` under `## Log` of `compass.file`.
+    /// Append-only like Health, so nothing ever collapses.
+    func logCompass(areaId: String, minutes: Int, note: String, slotID: String? = nil, now: Date = Date()) {
+        guard minutes > 0, let payload = dashboard?.compass, payload.area(areaId) != nil else { return }
+        let log = PendingCompassLog(file: payload.file, heading: CompassLog.heading(payload.logHeading),
+                                    date: CompassClock.today(now), areaId: areaId, minutes: minutes,
+                                    note: note, slotID: slotID, createdAt: now)
+        if var board = dashboard, let current = board.compass {
+            board.compass = CompassLog.applying([log], to: current)
+            dashboard = board
+            saveCache(board)
+        }
+        compassLog.append(log)
+        saveCompassQueue()
+        Task { await flushCompass() }
+    }
+
+    /// Timeline slots already logged today (their "✓ Done" button hides).
+    func compassLoggedSlots(now: Date = Date()) -> Set<String> {
+        let today = CompassClock.today(now)
+        return Set(compassLog.filter { $0.date == today }.compactMap(\.slotID))
+    }
+
+    @discardableResult
+    func flushCompass() async -> Bool {
+        guard !isFlushingCompass, compassPendingCount > 0, let service = serviceProvider() else {
+            return compassPendingCount == 0
+        }
+        isFlushingCompass = true
+        defer { isFlushingCompass = false }
+
+        while let index = compassLog.firstIndex(where: { $0.syncedAt == nil }) {
+            let log = compassLog[index]
+            do {
+                try await service.insertLine(path: log.file, underHeading: log.heading, line: log.line,
+                                             message: log.commitMessage, template: CompassLog.template)
+                if let i = compassLog.firstIndex(where: { $0.id == log.id }) { compassLog[i].syncedAt = Date() }
+                saveCompassQueue()
+                lastError = nil
+            } catch {
+                lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Replay logs a fresh payload hasn't counted yet, then forget synced ones
+    /// it has (today's stay, for the Done buttons; anything synced 2+ weeks ago goes).
+    private func applyCompassLog(to payload: CompassPayload?) -> CompassPayload? {
+        guard let payload else { return nil }
+        let replayed = CompassLog.applying(compassLog, to: payload)
+        let today = CompassClock.today(Date())
+        let before = compassLog.count
+        compassLog.removeAll { log in
+            guard log.syncedAt != nil else { return false }
+            if Date().timeIntervalSince(log.createdAt) > 14 * 86_400 { return true }
+            return log.date != today && !CompassLog.needsReplay(log, over: payload)
+        }
+        if compassLog.count != before { saveCompassQueue() }
+        return replayed
+    }
+
     // MARK: - Internals
 
     private func enqueue(_ action: PendingTaskAction) {
@@ -1048,5 +1127,16 @@ final class DashboardStore: ObservableObject {
     private func saveFactQueue() {
         guard let data = try? JSONEncoder().encode(factPending) else { return }
         try? data.write(to: factQueueURL, options: .atomic)
+    }
+
+    private func loadCompassQueue() {
+        guard let data = try? Data(contentsOf: compassQueueURL),
+              let items = try? JSONDecoder().decode([PendingCompassLog].self, from: data) else { return }
+        compassLog = items
+    }
+
+    private func saveCompassQueue() {
+        guard let data = try? JSONEncoder().encode(compassLog) else { return }
+        try? data.write(to: compassQueueURL, options: .atomic)
     }
 }

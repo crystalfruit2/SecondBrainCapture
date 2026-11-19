@@ -15,10 +15,23 @@ extension GitHubService {
         let sha: String
     }
 
-    /// Fetch and decode `dashboard.json` from the repo root.
+    /// Branch CI publishes `dashboard.json` to. Keeping the generated payload off
+    /// `main` means CI never moves the branch under the Mac's auto-pushes.
+    static let dashboardBranch = "dashboard-state"
+
+    /// Fetch and decode `dashboard.json`. Prefers the `dashboard-state` branch
+    /// and falls back to the vault branch (the file lived there before the move).
     func fetchDashboard(path: String) async throws -> Dashboard {
+        do {
+            return try await fetchDashboard(path: path, ref: Self.dashboardBranch)
+        } catch GitHubError.badResponse(let code, _) where code == 404 {
+            return try await fetchDashboard(path: path, ref: config.branch)
+        }
+    }
+
+    private func fetchDashboard(path: String, ref: String) async throws -> Dashboard {
         guard !token.isEmpty else { throw GitHubError.missingToken }
-        guard let url = contentsURL(for: path, ref: config.branch) else { throw GitHubError.badURL }
+        guard let url = contentsURL(for: path, ref: ref) else { throw GitHubError.badURL }
 
         var req = authedRequest(url: url, method: "GET")
         // The raw representation skips base64 and, more importantly, skips the

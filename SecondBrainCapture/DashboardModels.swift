@@ -682,6 +682,9 @@ struct Dashboard: Codable, Equatable {
     /// Schema v6 `pocket.facts` (2026-10-15): the undated must-remember bullets
     /// under `## Important`. Older payloads lack the key → [].
     var pocketFacts: [PocketFact]
+    /// Schema v7 `compass` key (2026-11-08): today's plan, the ranked list and
+    /// the weekly hour budget (CompassModels.swift). Older dashboards lack it → nil.
+    var compass: CompassPayload?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -707,6 +710,8 @@ struct Dashboard: Codable, Equatable {
         pocket = pocketPayload?.items ?? []
         pocketFile = pocketPayload?.file
         pocketFacts = pocketPayload?.facts ?? []
+        // Schema v7. `try?` like Pocket: a malformed Compass hides itself, nothing else.
+        compass = (try? c.decodeIfPresent(CompassPayload.self, forKey: .compass)) ?? nil
     }
 
     init(version: Int = 1, generated: String? = nil, rocky: RockyNudge? = nil,
@@ -714,13 +719,15 @@ struct Dashboard: Codable, Equatable {
          market: [MarketItem] = [], todo: [TodoItem] = [], todoFile: String? = nil,
          companion: CompanionData = CompanionData(),
          health: HealthToday = HealthToday(), finance: FinancePayload? = nil,
-         pocket: [PocketItem] = [], pocketFile: String? = nil, pocketFacts: [PocketFact] = []) {
+         pocket: [PocketItem] = [], pocketFile: String? = nil, pocketFacts: [PocketFact] = [],
+         compass: CompassPayload? = nil) {
         self.version = version; self.generated = generated; self.rocky = rocky
         self.tasks = tasks; self.agenda = agenda; self.projects = projects
         self.market = market; self.todo = todo; self.todoFile = todoFile
         self.companion = companion; self.health = health
         self.finance = finance
         self.pocket = pocket; self.pocketFile = pocketFile; self.pocketFacts = pocketFacts
+        self.compass = compass
     }
 
     /// Re-wrap for the encoder so the cache round-trips through the same
@@ -739,10 +746,11 @@ struct Dashboard: Codable, Equatable {
         try c.encode(health, forKey: .health)
         try c.encodeIfPresent(finance, forKey: .finance)
         try c.encode(PocketPayload(file: pocketFile, items: pocket, facts: pocketFacts), forKey: .pocket)
+        try c.encodeIfPresent(compass, forKey: .compass)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, generated, rocky, tasks, agenda, projects, market, todo, companion, health, finance, pocket
+        case version, generated, rocky, tasks, agenda, projects, market, todo, companion, health, finance, pocket, compass
     }
 
     /// The wire shape of the `todo` key.

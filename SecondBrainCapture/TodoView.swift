@@ -18,6 +18,7 @@ struct TodoView: View {
     @State private var feedback = 0
     @State private var nudgeSent = false
     @State private var expanded: Set<String> = []
+    @State private var showCompass = false
 
     enum Segment: String, CaseIterable, Identifiable {
         case today = "Today", week = "Week", errands = "Errands", buy = "Buy", vault = "Vault"
@@ -45,6 +46,7 @@ struct TodoView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
+            .navigationDestination(isPresented: $showCompass) { CompassScreen() }
             .navigationTitle("To Do")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -83,6 +85,11 @@ struct TodoView: View {
                let s = Segment(rawValue: CommandLine.arguments[i + 1]) {
                 segment = s
             }
+            // `… -sbcOpenCompass` pushes Compass straight away.
+            if CommandLine.arguments.contains("-sbcOpenCompass") {
+                segment = .today
+                showCompass = true
+            }
             #endif
         }
     }
@@ -90,7 +97,8 @@ struct TodoView: View {
     @ViewBuilder
     private var content: some View {
         switch segment {
-        case .today: TodayList(showCompleted: showCompleted, nudgeSent: $nudgeSent, feedback: $feedback)
+        case .today: TodayList(showCompleted: showCompleted, nudgeSent: $nudgeSent, feedback: $feedback,
+                               openCompass: { showCompass = true })
         case .week: WeekList(showCompleted: showCompleted, feedback: $feedback)
         case .errands: ErrandsList(showCompleted: showCompleted, feedback: $feedback)
         case .buy: MarketListContent()
@@ -273,6 +281,7 @@ private struct TodayList: View {
     let showCompleted: Bool
     @Binding var nudgeSent: Bool
     @Binding var feedback: Int
+    var openCompass: () -> Void = {}
     @State private var addingRoutine = false
 
     private var board: Dashboard? { store.dashboard }
@@ -284,6 +293,25 @@ private struct TodayList: View {
 
     var body: some View {
         List {
+            // Compass (2026-11-08): what to be doing now; tap for the full plan.
+            if let compass = board?.compass {
+                Section {
+                    Button(action: openCompass) {
+                        HStack(spacing: 4) {
+                            TimelineView(.everyMinute) { context in
+                                CompassNowCard(payload: compass, now: context.date, compact: true)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                                .padding(.trailing, 14)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets())
+                }
+            }
+
             StatusSection()
 
             if let rocky = board?.rocky {

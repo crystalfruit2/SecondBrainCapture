@@ -29,7 +29,8 @@ final class TodoNotifier {
                     now: Date = Date()) async {
         #if DEBUG
         // Simulator screenshots must not be blocked by the permission alert.
-        if CommandLine.arguments.contains("-sbcTodoSegment") || CommandLine.arguments.contains("-sbcPocket") { return }
+        if CommandLine.arguments.contains("-sbcTodoSegment") || CommandLine.arguments.contains("-sbcPocket")
+            || CommandLine.arguments.contains("-sbcOpenCompass") { return }
         #endif
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()

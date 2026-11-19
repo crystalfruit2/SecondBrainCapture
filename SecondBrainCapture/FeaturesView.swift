@@ -13,11 +13,13 @@ struct FeaturesView: View {
     @State private var section: Segment = .health
 
     enum Segment: String, CaseIterable, Identifiable {
-        case health = "Health", projects = "Projects", finance = "Finance"
+        case health = "Health", projects = "Projects", finance = "Finance", compass = "Compass"
         var id: String { rawValue }
     }
 
     private var board: Dashboard? { store.dashboard }
+    /// Compass only shows once the dashboard carries it (schema v7).
+    private var segments: [Segment] { Segment.allCases.filter { $0 != .compass || board?.compass != nil } }
 
     var body: some View {
         NavigationStack {
@@ -40,7 +42,7 @@ struct FeaturesView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Picker("Section", selection: $section) {
-                        ForEach(Segment.allCases) { s in Text(s.rawValue).tag(s) }
+                        ForEach(segments) { s in Text(s.rawValue).tag(s) }
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 320)
@@ -63,6 +65,7 @@ struct FeaturesView: View {
         case .health: HealthLogContent()
         case .projects: ProjectsContent()
         case .finance: FinanceContent()
+        case .compass: CompassContent(logPlacement: .topBarLeading)
         }
     }
 }

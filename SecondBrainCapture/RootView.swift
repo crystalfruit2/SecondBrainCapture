@@ -58,6 +58,7 @@ struct RootView: View {
             let args = CommandLine.arguments
             if args.contains("-sbcTodoSegment") { tab = 1 }   // simulator screenshots
             if args.contains("-sbcPocket") { tab = 2 }
+            if args.contains("-sbcOpenCompass") { tab = 1 }
             #endif
         }
     }

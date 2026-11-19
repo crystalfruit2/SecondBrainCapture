@@ -4,7 +4,7 @@
 //
 //   S=SecondBrainCapture
 //   swiftc -parse-as-library $S/ExpenseParser.swift $S/ExpenseStore.swift $S/GitHubService.swift \
-//          $S/AppConfig.swift $S/KeychainStore.swift $S/DashboardModels.swift \
+//          $S/AppConfig.swift $S/KeychainStore.swift $S/DashboardModels.swift $S/CompassModels.swift \
 //          Checks/expense_checks.swift -o /tmp/expense_checks
 //   /tmp/expense_checks [output-dir]
 //

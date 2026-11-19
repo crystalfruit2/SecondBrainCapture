@@ -4,7 +4,7 @@
 // simulator or network needed — run from the repo root:
 //
 //   S=SecondBrainCapture
-//   swiftc -parse-as-library $S/DashboardModels.swift $S/TodoNotifier.swift \
+//   swiftc -parse-as-library $S/DashboardModels.swift $S/CompassModels.swift $S/TodoNotifier.swift \
 //          $S/TodoEditors.swift $S/GitHubService.swift $S/GitHubService+Dashboard.swift \
 //          Checks/pocket_checks.swift -o /tmp/pocket_checks
 //   /tmp/pocket_checks [path/to/older-dashboard.json]

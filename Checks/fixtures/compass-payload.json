@@ -1,0 +1,419 @@
+{
+ "version": 7,
+ "generated": "2026-11-09T07:12:00+01:00",
+ "rocky": null,
+ "tasks": [],
+ "agenda": [],
+ "projects": [
+  {
+   "name": "Rocky Commercial",
+   "status": "active",
+   "note": null,
+   "nextAction": "Gate A",
+   "openTasks": 3
+  }
+ ],
+ "market": [],
+ "todo": {
+  "file": "Areas/To-Do.md",
+  "items": [
+   {
+    "id": "r1",
+    "text": "Morning stretch",
+    "section": "routine",
+    "recur": "daily",
+    "done": false,
+    "due": null,
+    "time": null,
+    "lastDone": null,
+    "file": "Areas/To-Do.md",
+    "line": 12,
+    "raw": "- [ ] 🔁 daily Morning stretch"
+   },
+   {
+    "id": "r2",
+    "text": "Review today's Compass plan",
+    "section": "routine",
+    "recur": "daily",
+    "done": false,
+    "due": null,
+    "time": null,
+    "lastDone": null,
+    "file": "Areas/To-Do.md",
+    "line": 13,
+    "raw": "- [ ] 🔁 daily Review today's Compass plan"
+   },
+   {
+    "id": "t1",
+    "text": "Print the Learning Agreement",
+    "section": "todo",
+    "recur": null,
+    "done": false,
+    "due": "2026-11-09",
+    "time": "11:00",
+    "lastDone": null,
+    "file": "Areas/To-Do.md",
+    "line": 17,
+    "raw": "- [ ] Print the Learning Agreement 📅 2026-11-09 ⏰ 11:00"
+   }
+  ]
+ },
+ "pocket": {
+  "file": "Areas/Pocket.md",
+  "items": [],
+  "facts": []
+ },
+ "companion": {
+  "threads": [],
+  "decisions": [],
+  "seeds": []
+ },
+ "health": {
+  "loggedToday": []
+ },
+ "compass": {
+  "file": "Areas/Compass.md",
+  "logHeading": "Log",
+  "date": "2026-11-09",
+  "week": "2026-W46",
+  "generated": "2026-11-09T07:12:00+01:00",
+  "headline": "A&PC is 0/4 h and below its floor: do A&PC first.",
+  "capacity": {
+   "freeMin": 1860,
+   "targetMin": 1740,
+   "classMin": 1035,
+   "remainingFreeMin": 1500
+  },
+  "areas": [
+   {
+    "id": "apc",
+    "name": "Adaptive & Predictive Control",
+    "emoji": "🎛️",
+    "kind": "study",
+    "targetMin": 240,
+    "floorMin": 120,
+    "doneMin": 0,
+    "loggedMin": 0,
+    "estimatedMin": 0,
+    "status": "below-floor",
+    "lastTouched": "2026-11-05",
+    "next": "rework Wed lecture (MPC intro)",
+    "deadline": null,
+    "deadlineLabel": null
+   },
+   {
+    "id": "rl",
+    "name": "Reinforcement Learning",
+    "emoji": "🤖",
+    "kind": "study",
+    "targetMin": 240,
+    "floorMin": 120,
+    "doneMin": 60,
+    "loggedMin": 60,
+    "estimatedMin": 0,
+    "status": "behind",
+    "lastTouched": "2026-11-08",
+    "next": "HW3 Task 1 (due Wed)",
+    "deadline": null,
+    "deadlineLabel": null
+   },
+   {
+    "id": "opt",
+    "name": "Optimization Methods",
+    "emoji": "📐",
+    "kind": "study",
+    "targetMin": 240,
+    "floorMin": 120,
+    "doneMin": 150,
+    "loggedMin": 150,
+    "estimatedMin": 0,
+    "status": "on-pace",
+    "lastTouched": "2026-11-08",
+    "next": "slides 72+ (trust region)",
+    "deadline": "2027-03-02",
+    "deadlineLabel": "exam ~02.03"
+   },
+   {
+    "id": "prml",
+    "name": "Pattern Recognition & ML I",
+    "emoji": "🧠",
+    "kind": "study",
+    "targetMin": 180,
+    "floorMin": 90,
+    "doneMin": 90,
+    "loggedMin": 90,
+    "estimatedMin": 0,
+    "status": "on-pace",
+    "lastTouched": "2026-11-06",
+    "next": "resume slide 164",
+    "deadline": null,
+    "deadlineLabel": null
+   },
+   {
+    "id": "deutsch",
+    "name": "German A2.1",
+    "emoji": "🇩🇪",
+    "kind": "study",
+    "targetMin": 120,
+    "floorMin": 60,
+    "doneMin": 60,
+    "loggedMin": 60,
+    "estimatedMin": 0,
+    "status": "on-pace",
+    "lastTouched": "2026-11-07",
+    "next": "homework: weil 7b",
+    "deadline": null,
+    "deadlineLabel": null
+   },
+   {
+    "id": "sport",
+    "name": "Sport",
+    "emoji": "🏐",
+    "kind": "sport",
+    "targetMin": 180,
+    "floorMin": 90,
+    "doneMin": 90,
+    "loggedMin": 90,
+    "estimatedMin": 0,
+    "status": "on-pace",
+    "lastTouched": "2026-11-06",
+    "next": null,
+    "deadline": null,
+    "deadlineLabel": null
+   },
+   {
+    "id": "summer27",
+    "name": "Summer 2027 applications",
+    "emoji": "🇨🇭",
+    "kind": "project",
+    "targetMin": 300,
+    "floorMin": 120,
+    "doneMin": 30,
+    "loggedMin": 0,
+    "estimatedMin": 30,
+    "status": "behind",
+    "lastTouched": "2026-11-04",
+    "next": "host-lab list (≥4 names)",
+    "deadline": "2026-11-29",
+    "deadlineLabel": "EPFL closes 29.11"
+   },
+   {
+    "id": "rocky",
+    "name": "Rocky / Erid",
+    "emoji": "🧩",
+    "kind": "project",
+    "targetMin": 240,
+    "floorMin": 60,
+    "doneMin": 300,
+    "loggedMin": 120,
+    "estimatedMin": 180,
+    "status": "ahead",
+    "lastTouched": "2026-11-08",
+    "next": "Developer ID decision",
+    "deadline": "2026-12-15",
+    "deadlineLabel": "gate 15.12"
+   },
+   {
+    "id": "admin",
+    "name": "Life admin",
+    "emoji": "🏠",
+    "kind": "life",
+    "targetMin": 0,
+    "floorMin": 0,
+    "doneMin": 0,
+    "loggedMin": 0,
+    "estimatedMin": 0,
+    "status": "idle",
+    "lastTouched": null,
+    "next": null,
+    "deadline": null,
+    "deadlineLabel": null
+   }
+  ],
+  "fixed": [
+   {
+    "start": "08:30",
+    "end": "10:00",
+    "title": "A&PC V+Ü · HS 0446",
+    "kind": "class",
+    "area": "apc"
+   },
+   {
+    "start": "14:15",
+    "end": "15:45",
+    "title": "RL lecture · Room -1607",
+    "kind": "class",
+    "area": "rl"
+   },
+   {
+    "start": "18:15",
+    "end": "19:45",
+    "title": "🏐 Volleyball, Aueparkhalle",
+    "kind": "sport",
+    "area": "sport"
+   }
+  ],
+  "blocks": [
+   {
+    "start": "10:15",
+    "end": "11:45",
+    "minutes": 90,
+    "area": "apc",
+    "kind": "study",
+    "title": "A&PC: rework Wed lecture (MPC intro)",
+    "why": [
+     "0/4 h this week, below floor",
+     "retake: fail → FF"
+    ],
+    "taskId": null
+   },
+   {
+    "start": "13:15",
+    "end": "14:00",
+    "minutes": 45,
+    "area": "summer27",
+    "kind": "task",
+    "title": "Host-lab list: 2 more names",
+    "why": [
+     "EPFL closes 29.11",
+     "0.5/5 h"
+    ],
+    "taskId": "a91f02"
+   },
+   {
+    "start": "16:00",
+    "end": "17:30",
+    "minutes": 90,
+    "area": "rl",
+    "kind": "task",
+    "title": "RL HW3 Task 1",
+    "why": [
+     "due Wed 11.11",
+     "RL 1/4 h"
+    ],
+    "taskId": "c1a2b3"
+   },
+   {
+    "start": "17:30",
+    "end": "18:00",
+    "minutes": 30,
+    "area": "deutsch",
+    "kind": "study",
+    "title": "German: weil 7b",
+    "why": [
+     "class Tue"
+    ],
+    "taskId": null
+   },
+   {
+    "start": "20:00",
+    "end": "21:00",
+    "minutes": 60,
+    "area": "opt",
+    "kind": "study",
+    "title": "OPT slides 72–75",
+    "why": [
+     "before Tue's lecture"
+    ],
+    "taskId": null
+   }
+  ],
+  "top": [
+   {
+    "id": "c1a2b3",
+    "title": "RL HW3 Task 1",
+    "area": "rl",
+    "score": 84,
+    "minutes": 60,
+    "due": "2026-11-11",
+    "why": [
+     "due Wed 11.11",
+     "RL 1/4 h"
+    ],
+    "source": "Daily/2026-11-08.md",
+    "kind": "task"
+   },
+   {
+    "id": "s-apc",
+    "title": "A&PC: rework Wed lecture",
+    "area": "apc",
+    "score": 81,
+    "minutes": 90,
+    "due": null,
+    "why": [
+     "below floor",
+     "retake: fail → FF"
+    ],
+    "source": "Areas/Compass.md",
+    "kind": "study"
+   },
+   {
+    "id": "a91f02",
+    "title": "Host-lab list (≥4 names)",
+    "area": "summer27",
+    "score": 72,
+    "minutes": 45,
+    "due": "2026-11-29",
+    "why": [
+     "EPFL closes 29.11"
+    ],
+    "source": "Daily/2026-11-08.md",
+    "kind": "task"
+   },
+   {
+    "id": "e77d10",
+    "title": "Ask Kumbasar for a reference",
+    "area": "summer27",
+    "score": 66,
+    "minutes": 15,
+    "due": null,
+    "why": [
+     "needs lead time"
+    ],
+    "source": "Daily/2026-11-08.md",
+    "kind": "task"
+   },
+   {
+    "id": "s-opt",
+    "title": "OPT slides 72–75",
+    "area": "opt",
+    "score": 58,
+    "minutes": 60,
+    "due": null,
+    "why": [
+     "before Tue's lecture"
+    ],
+    "source": "Areas/Compass.md",
+    "kind": "study"
+   },
+   {
+    "id": "b03c55",
+    "title": "German homework: weil 7b",
+    "area": "deutsch",
+    "score": 51,
+    "minutes": 30,
+    "due": "2026-11-10",
+    "why": [
+     "class Tue"
+    ],
+    "source": "Areas/To-Do.md",
+    "kind": "task"
+   }
+  ],
+  "letGo": [
+   {
+    "title": "Watch the Tencent WorldClaw reel",
+    "reason": "backlog, low weight, carried 2+ weeks"
+   },
+   {
+    "title": "Dance-Coach M1 demo",
+    "reason": "parked lane, no deadline"
+   },
+   {
+    "title": "Re-sort the Downloads folder",
+    "reason": "no area, carried 3 weeks"
+   }
+  ],
+  "waiting": 7
+ }
+}
