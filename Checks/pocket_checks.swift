@@ -225,6 +225,18 @@ enum PocketChecks {
         check("reminder at start − 30", fires.first?.fire == at(2026, 10, 15, 13, 45))
         check("all-day gets no reminder", !fires.contains { $0.item.id == "a" })
 
+        // 6. Vision (schema v8): decodes, round-trips, absent/malformed → empty.
+        let vjson = #"{"version":8,"vision":{"file":"Areas/Vision.md","entries":[{"id":"a1","date":"2026-11-21","text":"Build a robot"}]}}"#
+        if let d = try? JSONDecoder().decode(Dashboard.self, from: Data(vjson.utf8)) {
+            check("vision decodes", d.vision.count == 1 && d.vision[0].text == "Build a robot", "\(d.vision)")
+            let back = try? JSONDecoder().decode(Dashboard.self, from: JSONEncoder().encode(d))
+            check("vision round trip", back?.vision == d.vision && back?.visionFile == "Areas/Vision.md")
+        } else { check("vision decodes", false, "decode threw") }
+        let old = try? JSONDecoder().decode(Dashboard.self, from: Data(#"{"version":7}"#.utf8))
+        check("older dashboard → no vision", old?.vision.isEmpty == true)
+        let bad = try? JSONDecoder().decode(Dashboard.self, from: Data(#"{"version":8,"vision":{"entries":"x"}}"#.utf8))
+        check("malformed vision hides itself", bad != nil && bad?.vision.isEmpty == true)
+
         importantFacts(here)
 
         print("\n\(passed) passed, \(failures) failed")

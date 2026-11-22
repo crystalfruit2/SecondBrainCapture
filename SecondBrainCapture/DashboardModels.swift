@@ -685,6 +685,10 @@ struct Dashboard: Codable, Equatable {
     /// Schema v7 `compass` key (2026-11-08): today's plan, the ranked list and
     /// the weekly hour budget (CompassModels.swift). Older dashboards lack it → nil.
     var compass: CompassPayload?
+    /// Schema v8 `vision` key (2026-11-21): Alp's night-time vision log from
+    /// `Areas/Vision.md`, newest first. Older dashboards lack it → [].
+    var vision: [VisionEntry]
+    let visionFile: String?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -712,6 +716,10 @@ struct Dashboard: Codable, Equatable {
         pocketFacts = pocketPayload?.facts ?? []
         // Schema v7. `try?` like Pocket: a malformed Compass hides itself, nothing else.
         compass = (try? c.decodeIfPresent(CompassPayload.self, forKey: .compass)) ?? nil
+        // Schema v8. `try?` too: a malformed Vision hides itself, nothing else.
+        let visionPayload = (try? c.decodeIfPresent(VisionPayload.self, forKey: .vision)) ?? nil
+        vision = visionPayload?.entries ?? []
+        visionFile = visionPayload?.file
     }
 
     init(version: Int = 1, generated: String? = nil, rocky: RockyNudge? = nil,
@@ -720,7 +728,7 @@ struct Dashboard: Codable, Equatable {
          companion: CompanionData = CompanionData(),
          health: HealthToday = HealthToday(), finance: FinancePayload? = nil,
          pocket: [PocketItem] = [], pocketFile: String? = nil, pocketFacts: [PocketFact] = [],
-         compass: CompassPayload? = nil) {
+         compass: CompassPayload? = nil, vision: [VisionEntry] = [], visionFile: String? = nil) {
         self.version = version; self.generated = generated; self.rocky = rocky
         self.tasks = tasks; self.agenda = agenda; self.projects = projects
         self.market = market; self.todo = todo; self.todoFile = todoFile
@@ -728,6 +736,7 @@ struct Dashboard: Codable, Equatable {
         self.finance = finance
         self.pocket = pocket; self.pocketFile = pocketFile; self.pocketFacts = pocketFacts
         self.compass = compass
+        self.vision = vision; self.visionFile = visionFile
     }
 
     /// Re-wrap for the encoder so the cache round-trips through the same
@@ -747,10 +756,11 @@ struct Dashboard: Codable, Equatable {
         try c.encodeIfPresent(finance, forKey: .finance)
         try c.encode(PocketPayload(file: pocketFile, items: pocket, facts: pocketFacts), forKey: .pocket)
         try c.encodeIfPresent(compass, forKey: .compass)
+        try c.encode(VisionPayload(file: visionFile, entries: vision), forKey: .vision)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, generated, rocky, tasks, agenda, projects, market, todo, companion, health, finance, pocket, compass
+        case version, generated, rocky, tasks, agenda, projects, market, todo, companion, health, finance, pocket, compass, vision
     }
 
     /// The wire shape of the `todo` key.
@@ -800,6 +810,23 @@ struct Dashboard: Codable, Equatable {
     var upcomingTasks: [DashboardTask] { tasks(in: .upcoming) }
 
     var isEmpty: Bool { tasks.isEmpty && agenda.isEmpty && projects.isEmpty && rocky == nil }
+}
+
+// MARK: - Vision (schema v8, 2026-11-21)
+
+/// One line of `Areas/Vision.md` → `## Entries`: a thought Alp had at night
+/// about where he wants to head. Read-only on the phone; new ones go in through
+/// Capture (`envision …`) and Rocky files them.
+struct VisionEntry: Codable, Identifiable, Equatable, Hashable {
+    let id: String
+    let date: String            // YYYY-MM-DD
+    let text: String
+}
+
+/// The wire shape of the `vision` key.
+struct VisionPayload: Codable, Equatable {
+    let file: String?
+    let entries: [VisionEntry]
 }
 
 // MARK: - Pocket (schema v5)

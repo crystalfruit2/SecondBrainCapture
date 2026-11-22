@@ -20,7 +20,7 @@ struct PocketView: View {
                 if let board = store.dashboard {
                     // Re-evaluated every minute so finished items drop off while the tab is open.
                     TimelineView(.everyMinute) { context in
-                        PocketList(items: board.pocket, facts: board.pocketFacts, now: context.date)
+                        PocketList(items: board.pocket, facts: board.pocketFacts, vision: board.vision, now: context.date)
                     }
                 } else if !config.hasToken {
                     DashboardPlaceholder(icon: "key.horizontal",
@@ -54,6 +54,7 @@ private struct PocketList: View {
     @EnvironmentObject var store: DashboardStore
     let items: [PocketItem]
     let facts: [PocketFact]
+    let vision: [VisionEntry]
     let now: Date
     @State private var editing: PocketFact?
     @State private var feedback = 0
@@ -116,6 +117,9 @@ private struct PocketList: View {
                     .textCase(nil)
             }
 
+            // Vision: where Alp wants to head — night thoughts, kept for the daytime.
+            VisionSection(entries: vision)
+
             if groups.isEmpty {
                 Section {
                     DashboardPlaceholder(icon: "pin",
@@ -151,6 +155,80 @@ private struct PocketList: View {
     }
 }
 
+/// The Vision log: what Alp wanted at night, in front of him by day. Latest
+/// few inline, the rest behind "Show all". Adding goes through Capture
+/// (`envision …`) — Rocky files it into `Areas/Vision.md` next session, so the
+/// entry appears here after the next dashboard build, not instantly.
+private struct VisionSection: View {
+    @EnvironmentObject var queue: CaptureQueue
+    let entries: [VisionEntry]
+    @State private var sent = false
+    @State private var feedback = 0
+    private let inlineCount = 3
+
+    var body: some View {
+        Section {
+            if entries.isEmpty {
+                Text("Night thoughts about where you want to head. Type one below — or tell Rocky “envision …”.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(entries.prefix(inlineCount)) { VisionRow(entry: $0) }
+            if entries.count > inlineCount {
+                NavigationLink("Show all \(entries.count)") { VisionListView(entries: entries) }
+                    .font(.subheadline)
+            }
+            PocketFactAddRow(placeholder: "Add a thought about where you're heading") { text in
+                queue.enqueue("envision \(text)")
+                Task { await queue.flush() }   // don't wait for the next launch / reconnect
+                sent = true
+                feedback += 1
+            }
+        } header: {
+            SectionHeader(title: "Vision", count: entries.isEmpty ? nil : entries.count, tint: .purple)
+                .textCase(nil)
+        } footer: {
+            if sent {
+                Text(queue.pending.isEmpty
+                     ? "Sent — Rocky adds it to your Vision note in the next session."
+                     : "Saved on this phone — it sends as soon as you're online.")
+            }
+        }
+        .sensoryFeedback(.success, trigger: feedback)
+    }
+}
+
+private struct VisionRow: View {
+    let entry: VisionEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(entry.text)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(entry.date)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct VisionListView: View {
+    let entries: [VisionEntry]
+
+    var body: some View {
+        List(entries) { VisionRow(entry: $0) }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Vision")
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 /// Label bold, detail underneath — the detail is the thing you came for
 /// ("4417"), so it gets the room.
 private struct PocketFactRow: View {
@@ -180,6 +258,7 @@ private struct PocketFactRow: View {
 /// One field: `label — detail` (the em dash is optional). Modelled on
 /// `TodoAddBar`, minus the date controls a fact doesn't have.
 private struct PocketFactAddRow: View {
+    var placeholder = "Add something to remember"
     let onAdd: (String) -> Void
     @State private var text = ""
 
@@ -189,7 +268,7 @@ private struct PocketFactAddRow: View {
         HStack(spacing: 10) {
             Image(systemName: "plus.circle")
                 .foregroundStyle(.secondary)
-            TextField("Add something to remember", text: $text)
+            TextField(placeholder, text: $text)
                 .submitLabel(.done)
                 .onSubmit(add)
             if canAdd {
