@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct ContentView: View {
     @EnvironmentObject var config: AppConfig
@@ -12,7 +13,14 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showCamera = false
     @State private var photo: UIImage?        // prepared (downscaled) attachment
+    @State private var libraryItem: PhotosPickerItem?   // photo picked from the library
+    @State private var isLoadingLibrary = false   // from pick until its OCR has finished
     @FocusState private var editorFocused: Bool
+
+    /// True from the moment a library photo is picked until its OCR is done.
+    /// `ocr.isRecognizing` alone misses the download/decode gap before OCR
+    /// starts, during which Capture would otherwise save the note without it.
+    private var isBusy: Bool { ocr.isRecognizing || isLoadingLibrary }
 
     enum Status: Equatable {
         case idle, committing, success, queued(Int), error(String)
@@ -34,6 +42,7 @@ struct ContentView: View {
                         HStack(spacing: 12) {
                             recordButton
                             photoButton
+                            libraryButton
                         }
                         captureButton
                     }
@@ -60,6 +69,11 @@ struct ContentView: View {
                     Task { await attach(picked) }
                 }
                 .ignoresSafeArea()
+            }
+            .onChange(of: libraryItem) { _, item in
+                guard let item else { return }
+                libraryItem = nil   // so picking the same image again still fires
+                Task { await attachFromLibrary(item) }
             }
             .onChange(of: speech.transcript) { _, newValue in
                 draft = baseText.isEmpty ? newValue : baseText + " " + newValue
@@ -91,7 +105,9 @@ struct ContentView: View {
         Group {
             switch status {
             case .idle:
-                if ocr.isRecognizing {
+                if isLoadingLibrary && !ocr.isRecognizing {
+                    statusBadge("Loading photo…", icon: "photo", color: .secondary)
+                } else if ocr.isRecognizing {
                     statusBadge("Reading text…", icon: "text.viewfinder", color: .secondary)
                 } else if speech.isRecording {
                     statusBadge("Listening…", icon: "waveform", color: .red)
@@ -171,15 +187,27 @@ struct ContentView: View {
         )
     }
 
+    /// Icon over caption. Three side-by-side icon+text labels don't fit a
+    /// phone-width row (they truncated to "Reco…", "Ca…", "Libr…"), and stacking
+    /// also keeps them readable at larger Dynamic Type sizes.
+    private func inputLabel(_ title: String, icon: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon).font(.title3)
+            Text(title)
+                .font(.footnote.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+    }
+
     private var recordButton: some View {
         Button {
             Task { await toggleRecording() }
         } label: {
-            Label(speech.isRecording ? "Stop" : "Record",
-                  systemImage: speech.isRecording ? "stop.circle.fill" : "mic.circle.fill")
-                .font(.body.weight(.medium))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+            inputLabel(speech.isRecording ? "Stop" : "Record",
+                       icon: speech.isRecording ? "stop.circle.fill" : "mic.circle.fill")
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 14))
@@ -191,15 +219,25 @@ struct ContentView: View {
         Button {
             showCamera = true
         } label: {
-            Label(photo == nil ? "Photo" : "Retake", systemImage: "camera.fill")
-                .font(.body.weight(.medium))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+            inputLabel("Camera", icon: "camera.fill")
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 14))
         .controlSize(.large)
-        .disabled(ocr.isRecognizing)
+        .disabled(isBusy || status == .committing)
+    }
+
+    /// Pick an existing photo or screenshot. The system picker runs out of
+    /// process, so unlike the camera it needs no photo-library permission.
+    private var libraryButton: some View {
+        PhotosPicker(selection: $libraryItem, matching: .images) {
+            inputLabel("Library", icon: "photo.on.rectangle")
+        }
+        .accessibilityLabel("Choose from photo library")
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+        .controlSize(.large)
+        .disabled(isBusy || status == .committing)
     }
 
     /// The attached photo, with a way to drop it. Shown at a readable size so a
@@ -214,6 +252,7 @@ struct ContentView: View {
 
             Button {
                 photo = nil
+                if case .error = status { status = .idle }
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title2)
@@ -238,7 +277,7 @@ struct ContentView: View {
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.roundedRectangle(radius: 14))
         .controlSize(.large)
-        .disabled(!hasSomethingToCapture || status == .committing || ocr.isRecognizing)
+        .disabled(!hasSomethingToCapture || status == .committing || isBusy)
     }
 
     /// A photo is a note in its own right — a whiteboard shot with no legible
@@ -278,6 +317,36 @@ struct ContentView: View {
         let existing = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = existing.isEmpty ? text : existing + "\n\n" + text
         baseText = draft   // keep dictation appending after the OCR text, not over it
+    }
+
+    /// Load a library pick, shrink it off the main thread, then run the same
+    /// path as a camera shot. `isLoadingLibrary` stays true until the OCR in
+    /// `attach` has finished, so Capture and the other inputs are locked for the
+    /// whole time (an iCloud original can take seconds to download). A failure
+    /// is shown, never silent: the picker has already closed, so without a
+    /// message it would look like nothing happened.
+    private func attachFromLibrary(_ item: PhotosPickerItem) async {
+        isLoadingLibrary = true
+        defer { isLoadingLibrary = false }
+
+        let data: Data?
+        do {
+            data = try await item.loadTransferable(type: Data.self)
+        } catch {
+            status = .error("Couldn't load that photo. Check your connection and try again.")
+            return
+        }
+        guard let data else {
+            status = .error("Couldn't load that photo. Check your connection and try again.")
+            return
+        }
+        guard let image = await Task.detached(priority: .userInitiated, operation: {
+            ImageStore.downsampled(from: data)
+        }).value else {
+            status = .error("Couldn't read that image. Try another one.")
+            return
+        }
+        await attach(image)
     }
 
     private func capture() async {

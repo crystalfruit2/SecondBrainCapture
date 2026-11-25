@@ -1,4 +1,5 @@
 import UIKit
+import ImageIO
 
 /// Local staging for captured photos.
 ///
@@ -41,9 +42,40 @@ enum ImageStore {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1          // target is already in pixels
         format.opaque = true      // photos have no alpha; opaque encodes smaller
-        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+        return UIGraphicsImageRenderer(size: target, format: format).image { context in
+            // Library picks can carry alpha (PNG screenshots, stickers); an
+            // opaque canvas would turn transparency black and hide dark text.
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: target))
             image.draw(in: CGRect(origin: .zero, size: target))
         }
+    }
+
+    /// Decode picked library bytes straight to at most `maxDimension` pixels.
+    ///
+    /// The library hands over the original file (a 48 MP HEIC is ~190 MB as a
+    /// decoded bitmap), so decoding it whole and then redrawing smaller, as
+    /// `prepared` does for a camera shot, risks a memory spike. ImageIO decodes
+    /// directly at the target size and bakes in the EXIF orientation. Never
+    /// upscales. Returns nil when the bytes aren't a readable image.
+    static func downsampled(from data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(
+                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Int,
+              let height = props[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0 else { return nil }
+
+        let target = min(max(width, height), Int(maxDimension))
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: target,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: cgImage)   // scale 1, orientation .up
     }
 
     static func jpegData(for image: UIImage) -> Data? {
